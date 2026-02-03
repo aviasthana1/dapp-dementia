@@ -5,6 +5,9 @@
 
   export default defineConfig({
     plugins: [react()],
+    optimizeDeps: {
+      include: ['firebase/app', 'firebase/auth', 'firebase/firestore'],
+    },
     resolve: {
       extensions: ['.js', '.jsx', '.ts', '.tsx', '.json'],
       alias: {
@@ -47,6 +50,9 @@
         '@radix-ui/react-alert-dialog@1.1.6': '@radix-ui/react-alert-dialog',
         '@radix-ui/react-accordion@1.2.3': '@radix-ui/react-accordion',
         '@': path.resolve(__dirname, './src'),
+        'firebase/app': path.resolve(__dirname, 'node_modules/firebase/app/dist/esm/index.esm.js'),
+        'firebase/auth': path.resolve(__dirname, 'node_modules/firebase/auth/dist/esm/index.esm.js'),
+        'firebase/firestore': path.resolve(__dirname, 'node_modules/firebase/firestore/dist/esm/index.esm.js'),
       },
     },
     build: {
@@ -54,7 +60,7 @@
       outDir: 'build',
     },
     server: {
-      port: 3000,
+      port: 3001,
       open: true,
     },
   });

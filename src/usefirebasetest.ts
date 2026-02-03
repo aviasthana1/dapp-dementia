@@ -1,4 +1,4 @@
-import { db } from "@/src/services/firebase";
+import { db } from "@/services/firebase";
 import { doc, getDoc } from "firebase/firestore";
 import { useEffect } from "react";
 
