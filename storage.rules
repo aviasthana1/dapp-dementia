@@ -1,0 +1,11 @@
+rules_version = '2';
+// CareConnect Firebase Storage – reminder photos
+// Copy into Firebase Console → Storage → Rules (or deploy with Firebase CLI)
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /reminders/{patientId}/{reminderId}/{fileName} {
+      allow read, write: if true;
+    }
+  }
+}
