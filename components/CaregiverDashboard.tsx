@@ -4,10 +4,11 @@ import {
   createReminder,
   uploadReminderPhoto,
   setReminderPhotoUrl,
+  getLocationHistoryForPatient,
 } from '../src/services/firestoreData';
-import type { Reminder } from '../src/services/firestoreData';
-import { ArrowLeft, Bell, Plus, LogOut, Clock, Image, X } from 'lucide-react';
-import { ReminderListSkeleton } from './Skeleton';
+import type { Reminder, PatientLocationEvent } from '../src/services/firestoreData';
+import { ArrowLeft, Bell, Plus, LogOut, Clock, Image, X, MapPin } from 'lucide-react';
+import { LocationHistorySkeleton, ReminderListSkeleton } from './Skeleton';
 
 type CaregiverDashboardProps = {
   caregiverEmail: string;
@@ -25,6 +26,21 @@ function ReminderPhoto({ url, alt, className }: { url: string; alt: string; clas
       className={`object-cover rounded-xl flex-shrink-0 ${className ?? 'w-16 h-16'}`}
     />
   );
+}
+
+function formatLocationTime(epoch: number): string {
+  if (!Number.isFinite(epoch)) return 'Unknown time';
+  // If Firestore stored milliseconds, it's usually > 1e12.
+  const ms = epoch > 1e12 ? epoch : epoch * 1000;
+  const d = new Date(ms);
+  return d.toLocaleString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
 }
 
 export function CaregiverDashboard({
@@ -52,6 +68,23 @@ export function CaregiverDashboard({
 
   useEffect(() => {
     loadReminders();
+  }, [patientId]);
+
+  const [locationHistory, setLocationHistory] = useState<PatientLocationEvent[]>([]);
+  const [locationLoading, setLocationLoading] = useState(true);
+  const [locationError, setLocationError] = useState<string | null>(null);
+
+  const loadLocationHistory = () => {
+    setLocationLoading(true);
+    setLocationError(null);
+    getLocationHistoryForPatient(patientId)
+      .then(setLocationHistory)
+      .catch((err) => setLocationError(err?.message ?? 'Failed to load location history'))
+      .finally(() => setLocationLoading(false));
+  };
+
+  useEffect(() => {
+    loadLocationHistory();
   }, [patientId]);
 
   const handleAddReminder = async (e: React.FormEvent) => {
@@ -220,6 +253,51 @@ export function CaregiverDashboard({
           )}
         </ul>
       )}
+
+      <div className="mt-8">
+        <p className="section-title flex items-center gap-2">
+          <MapPin className="w-6 h-6 text-blue-600" /> Location history
+        </p>
+        {locationError && (
+          <div className="p-4 mb-6 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xl">
+            {locationError}
+          </div>
+        )}
+        {locationLoading ? (
+          <LocationHistorySkeleton count={6} />
+        ) : locationHistory.length === 0 ? (
+          <div className="card p-6 rounded-2xl text-center">
+            <p className="text-xl text-gray-600 mb-2">No location history yet.</p>
+            <p className="text-base text-gray-500">
+              When location events are written to Firestore, you’ll see them here.
+            </p>
+          </div>
+        ) : (
+          <ul className="space-y-4">
+            {locationHistory.map((e, idx) => (
+              <li
+                key={e.id}
+                className={`card p-5 rounded-2xl flex items-start gap-4 ${idx === 0 ? 'border-2 border-green-200 bg-green-50 shadow-card-emerald' : ''}`}
+              >
+                <MapPin
+                  className={`w-7 h-7 ${idx === 0 ? 'text-teal-600' : 'text-blue-600'} flex-shrink-0`}
+                  aria-hidden
+                />
+                <div className="flex-1 min-w-0 space-y-2">
+                  <p className="text-xl font-semibold text-gray-900">
+                    {idx === 0 ? 'Latest: ' : ''}
+                    {e.room}
+                  </p>
+                  <p className="text-lg text-gray-600 flex items-center gap-1">
+                    <Clock className="w-5 h-5" aria-hidden />
+                    {formatLocationTime(e.time)}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }

@@ -13,6 +13,13 @@ service cloud.firestore {
     match /patients/{id} {
       allow read, write: if true;
     }
+    // Allow any nested documents/subcollections under a patient (e.g. location history).
+    match /patients/{id}/{document=**} {
+      allow read, write: if true;
+    }
+    match /patients/{id}/location/{eventId} {
+      allow read, write: if true;
+    }
     match /reminders/{id} {
       allow read, write: if true;
     }

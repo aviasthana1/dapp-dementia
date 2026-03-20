@@ -9,6 +9,7 @@ import {
   getDocs,
   writeBatch,
   query,
+  orderBy,
   where,
   updateDoc,
   addDoc,
@@ -198,4 +199,51 @@ export async function createReminder(
 export async function setReminderPhotoUrl(reminderId: string, photoUrl: string): Promise<void> {
   const reminderRef = doc(db, COLLECTIONS.REMINDERS, reminderId);
   await updateDoc(reminderRef, { photoUrl });
+}
+
+export type PatientLocationEvent = {
+  id: string;
+  /** Location where the patient was at `time`. */
+  room: string;
+  /**
+   * Epoch time number.
+   * We allow both seconds (e.g. 1710000000) and milliseconds (ms) depending on what was stored.
+   */
+  time: number;
+};
+
+/**
+ * Fetch a patient's location history.
+ * Stored at: `patients/{patientId}/location/{eventId}` with fields: `{ room, time }`.
+ */
+export async function getLocationHistoryForPatient(patientId: string): Promise<PatientLocationEvent[]> {
+  const locRef = collection(db, COLLECTIONS.PATIENTS, patientId, "location");
+
+  // Show newest first (descending) so the UI can highlight the latest location.
+  const q = query(locRef, orderBy("time", "desc"));
+  const snap = await getDocs(q);
+
+  const events: PatientLocationEvent[] = snap.docs
+    .map((d) => {
+      const data = d.data() as { room?: unknown; time?: unknown };
+
+      const room = typeof data.room === "string" ? data.room : "Unknown";
+
+      const rawTime = data.time;
+      let time = NaN;
+
+      if (typeof rawTime === "number") {
+        time = rawTime;
+      } else if (typeof rawTime === "string" && rawTime.trim()) {
+        time = Number(rawTime);
+      } else if (rawTime && typeof (rawTime as any).toMillis === "function") {
+        // Firestore Timestamp
+        time = (rawTime as any).toMillis();
+      }
+
+      return { id: d.id, room, time };
+    })
+    .filter((e) => Number.isFinite(e.time));
+
+  return events;
 }

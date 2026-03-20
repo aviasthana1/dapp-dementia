@@ -72,3 +72,19 @@ export function CardBlockSkeleton() {
     </div>
   );
 }
+
+export function LocationHistorySkeleton({ count = 5 }: { count?: number }) {
+  return (
+    <ul className="space-y-4">
+      {Array.from({ length: count }).map((_, i) => (
+        <li key={i} className="card p-5 rounded-2xl flex items-start gap-4">
+          <Skeleton className="w-12 h-12 flex-shrink-0 rounded-xl" />
+          <div className="flex-1 min-w-0 space-y-3">
+            <Skeleton className="h-6 max-w-[12rem] rounded" />
+            <Skeleton className="h-5 max-w-[16rem] rounded" />
+          </div>
+        </li>
+      ))}
+    </ul>
+  );
+}
