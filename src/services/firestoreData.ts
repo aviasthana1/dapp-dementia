@@ -19,6 +19,7 @@ import {
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "./firebase";
+import { seedHubConfigIfEmpty, seedRoomsIfEmpty } from "./roomTracking";
 
 // Collection names (tables)
 export const COLLECTIONS = {
@@ -102,6 +103,9 @@ export async function seedInitialDataIfEmpty(): Promise<void> {
   }
   await batch.commit();
   await seedLocationHistoryIfEmpty();
+
+  await seedRoomsIfEmpty();
+  await seedHubConfigIfEmpty();
 }
 
 const SEED_LOCATION_EVENTS: { patientId: string; id: string; room: string; time: number }[] = [
@@ -303,6 +307,38 @@ export async function getLocationHistoryForPatient(patientId: string): Promise<P
     .filter((e) => Number.isFinite(e.time));
 
   return events;
+}
+
+/** Live location history for caregiver dashboard (includes ESP32-mirrored events). */
+export function subscribeLocationHistoryForPatient(
+  patientId: string,
+  onUpdate: (events: PatientLocationEvent[]) => void,
+  onError?: (err: Error) => void
+): Unsubscribe {
+  const locRef = collection(db, COLLECTIONS.PATIENTS, patientId, "location");
+  const q = query(locRef, orderBy("time", "desc"));
+
+  return onSnapshot(
+    q,
+    (snap) => {
+      const events: PatientLocationEvent[] = snap.docs
+        .map((d) => {
+          const data = d.data() as { room?: unknown; time?: unknown };
+          const room = typeof data.room === "string" ? data.room : "Unknown";
+          const rawTime = data.time;
+          let time = NaN;
+          if (typeof rawTime === "number") time = rawTime;
+          else if (typeof rawTime === "string" && rawTime.trim()) time = Number(rawTime);
+          else if (rawTime && typeof (rawTime as { toMillis?: () => number }).toMillis === "function") {
+            time = (rawTime as { toMillis: () => number }).toMillis();
+          }
+          return { id: d.id, room, time };
+        })
+        .filter((e) => Number.isFinite(e.time));
+      onUpdate(events);
+    },
+    (err) => onError?.(err)
+  );
 }
 
 /** Record a location event for caregiver location history. */

@@ -26,5 +26,16 @@ service cloud.firestore {
     match /linkingCodes/{id} {
       allow read, write: if true;
     }
+
+    // ESP32 BLE hub (REST API + API key, no Firebase Auth) — demo only
+    match /rooms/{roomId} {
+      allow read, write: if true;
+      match /events/{eventId} {
+        allow read, write: if true;
+      }
+    }
+    match /hubConfig/{id} {
+      allow read, write: if true;
+    }
   }
 }

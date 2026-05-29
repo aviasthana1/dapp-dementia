@@ -1,4 +1,7 @@
-import { ArrowLeft, Settings, Type, Volume2, Bell, Link2, Unlink } from 'lucide-react';
+import { usePatientPreferences } from '../src/hooks/usePatientPreferences';
+import type { TextSize } from '../src/services/patientPreferences';
+import { playReminderSound, REMINDER_SOUND_OPTIONS } from '../src/services/reminderSound';
+import { BackButton, Button, Card, Page, PageTitle, SectionLabel } from './ui';
 
 type PatientSettingsProps = {
   linkedPatientName: string | null;
@@ -7,90 +10,154 @@ type PatientSettingsProps = {
   onUnlink?: () => void;
 };
 
+const TEXT_SIZE_OPTIONS: { id: TextSize; label: string }[] = [
+  { id: 'standard', label: 'Standard' },
+  { id: 'large', label: 'Large' },
+  { id: 'extra-large', label: 'Extra large' },
+];
+
 export function PatientSettings({
   linkedPatientName,
   onBack,
   onLinkAccount,
   onUnlink,
 }: PatientSettingsProps) {
+  const { prefs, update } = usePatientPreferences();
+
+  const handlePreviewSound = () => {
+    void playReminderSound(prefs.reminderSound);
+  };
+
   return (
-    <div className="min-h-screen app-page p-8 max-w-xl mx-auto">
-      <button
-        onClick={onBack}
-        className="btn-big w-full mb-6 border-2 border-gray-300 text-gray-800 bg-white hover:bg-gray-50 rounded-2xl flex items-center justify-center gap-2 shadow-sm"
-      >
-        <ArrowLeft className="w-6 h-6" /> Back
-      </button>
+    <Page className="patient-prefs-page">
+      <BackButton onClick={onBack} />
+      <PageTitle showLogo title="Settings" subtitle="Display and account options for My Reminders." />
 
-      <div className="card p-6 mb-8 shadow-card rounded-2xl px-8">
-        <h2 className="heading-big mb-2 flex items-center gap-2">
-          <Settings className="w-8 h-8 text-teal-600" /> Settings
-        </h2>
-        <p className="text-xl text-gray-600 leading-relaxed">
-          Make the app easier to see and hear. Changes here apply to “My Reminders.”
-        </p>
-      </div>
-
-      <p className="section-title">Account</p>
+      <SectionLabel>Account</SectionLabel>
       {linkedPatientName ? (
-        <div className="card p-6 rounded-2xl mb-6 shadow-card">
-          <p className="text-xl font-semibold text-gray-900 mb-1">
-            Linked as <strong>{linkedPatientName}</strong>
-          </p>
-          <p className="text-base text-gray-600 mb-4">
-            Your reminders come from your caregiver’s account.
+        <Card className="mb-4">
+          <p className="font-medium">Linked as {linkedPatientName}</p>
+          <p className="text-sm text-muted mt-1 mb-4">
+            Reminders sync from your caregiver&apos;s account.
           </p>
           {onUnlink && (
-            <button
-              type="button"
-              onClick={onUnlink}
-              className="w-full py-3 px-4 text-lg font-bold border-2 border-red-300 text-red-700 bg-red-50 hover:bg-red-100 rounded-xl flex items-center justify-center gap-2"
-            >
-              <Unlink className="w-5 h-5" aria-hidden /> Unlink account
-            </button>
+            <Button variant="danger" className="w-full" onClick={onUnlink}>
+              Unlink account
+            </Button>
           )}
-        </div>
+        </Card>
       ) : (
         onLinkAccount && (
-          <button
-            type="button"
-            onClick={onLinkAccount}
-            className="btn-ghost w-full rounded-2xl py-4 px-6 text-lg font-bold flex items-center justify-center gap-2 mb-6 min-h-[60px]"
-          >
-            <Link2 className="w-6 h-6" aria-hidden /> Link account with caregiver code
-          </button>
+          <Button className="w-full mb-4" onClick={onLinkAccount}>
+            Link with caregiver code
+          </Button>
         )
       )}
 
-      <p className="section-title">Display</p>
-      <div className="card p-6 rounded-2xl mb-6 shadow-card">
-        <p className="text-xl font-semibold text-gray-900 mb-2 flex items-center gap-2">
-          <Type className="w-6 h-6 text-teal-600" /> Text size
-        </p>
-        <p className="text-base text-gray-600 mb-4">
-          Larger text for buttons and reminders. (Placeholder: size slider or “Large / Extra large” options will appear here.)
-        </p>
-      </div>
+      <SectionLabel>Display</SectionLabel>
+      <Card className="mb-4">
+        <p className="font-medium mb-1">Text size</p>
+        <p className="text-sm text-muted mb-3">Applies to My Reminders screens.</p>
+        <div className="segmented" role="group" aria-label="Text size">
+          {TEXT_SIZE_OPTIONS.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              className={`segmented-item ${prefs.textSize === opt.id ? 'segmented-item--active' : ''}`}
+              aria-pressed={prefs.textSize === opt.id}
+              onClick={() => update({ textSize: opt.id })}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+      </Card>
 
-      <p className="section-title">Sound</p>
-      <div className="card p-6 rounded-2xl mb-6 shadow-card">
-        <p className="text-xl font-semibold text-gray-900 mb-2 flex items-center gap-2">
-          <Volume2 className="w-6 h-6 text-teal-600" /> Reminder sound
-        </p>
-        <p className="text-base text-gray-600 mb-4">
-          Choose a gentle sound for reminder alerts. (Placeholder: sound picker will appear here.)
-        </p>
-      </div>
+      <SectionLabel>Sound</SectionLabel>
+      <Card className="mb-4">
+        <label className="field" htmlFor="reminder-sound">
+          <span className="field-label">Reminder sound</span>
+          <select
+            id="reminder-sound"
+            className="input"
+            value={prefs.reminderSound}
+            onChange={(e) => update({ reminderSound: e.target.value as typeof prefs.reminderSound })}
+          >
+            {REMINDER_SOUND_OPTIONS.map((opt) => (
+              <option key={opt.id} value={opt.id}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <Button
+          type="button"
+          variant="secondary"
+          className="w-full mt-3"
+          onClick={handlePreviewSound}
+          disabled={prefs.reminderSound === 'none'}
+        >
+          Preview sound
+        </Button>
+      </Card>
 
-      <p className="section-title">Notifications</p>
-      <div className="card p-6 rounded-2xl shadow-card">
-        <p className="text-xl font-semibold text-gray-900 mb-2 flex items-center gap-2">
-          <Bell className="w-6 h-6 text-teal-600" /> When to remind
-        </p>
-        <p className="text-base text-gray-600">
-          Turn reminders on or off, and choose quiet hours. (Placeholder: toggles and time options will appear here.)
-        </p>
-      </div>
-    </div>
+      <SectionLabel>Notifications</SectionLabel>
+      <Card className="mb-4">
+        <label className="toggle-row">
+          <span>
+            <span className="font-medium">Reminder alerts</span>
+            <span className="text-sm text-muted block mt-0.5">
+              Play a sound when a new reminder appears.
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            className="toggle"
+            checked={prefs.notificationsEnabled}
+            onChange={(e) => update({ notificationsEnabled: e.target.checked })}
+          />
+        </label>
+      </Card>
+
+      <Card>
+        <label className="toggle-row mb-4">
+          <span>
+            <span className="font-medium">Quiet hours</span>
+            <span className="text-sm text-muted block mt-0.5">
+              Mute reminder sounds during these times.
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            className="toggle"
+            checked={prefs.quietHoursEnabled}
+            onChange={(e) => update({ quietHoursEnabled: e.target.checked })}
+          />
+        </label>
+
+        {prefs.quietHoursEnabled && (
+          <div className="quiet-hours-grid">
+            <label className="field">
+              <span className="field-label">From</span>
+              <input
+                type="time"
+                className="input"
+                value={prefs.quietHoursStart}
+                onChange={(e) => update({ quietHoursStart: e.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">To</span>
+              <input
+                type="time"
+                className="input"
+                value={prefs.quietHoursEnd}
+                onChange={(e) => update({ quietHoursEnd: e.target.value })}
+              />
+            </label>
+          </div>
+        )}
+      </Card>
+    </Page>
   );
 }

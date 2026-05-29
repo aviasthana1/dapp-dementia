@@ -1,11 +1,15 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   subscribeRemindersForPatient,
   updateReminderDone,
 } from '../src/services/firestoreData';
 import type { Reminder } from '../src/services/firestoreData';
-import { ListTodo, Sun, Phone, Settings, Link2 } from 'lucide-react';
+import { usePatientPreferences } from '../src/hooks/usePatientPreferences';
+import { shouldPlayReminderSound } from '../src/services/patientPreferences';
+import { playReminderSound } from '../src/services/reminderSound';
 import { CurrentTaskCardSkeleton } from './Skeleton';
+import { LogoMark } from './Logo';
+import { Button, Card, ErrorBanner, PageTitle, SectionLabel } from './ui';
 
 const CAREGIVER_PHONE_KEY = 'caregiverPhone';
 const DEFAULT_CAREGIVER_PHONE = '+15551234567';
@@ -43,6 +47,8 @@ export function PatientHomeScreen({
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [loading, setLoading] = useState(!!patientId);
   const [error, setError] = useState<string | null>(null);
+  const { prefs } = usePatientPreferences();
+  const prevTaskIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -75,6 +81,15 @@ export function PatientHomeScreen({
 
   const currentTask = reminders[0] ?? null;
 
+  useEffect(() => {
+    if (!currentTask || loading) return;
+    const prev = prevTaskIdRef.current;
+    prevTaskIdRef.current = currentTask.id;
+    if (prev && prev !== currentTask.id && shouldPlayReminderSound(prefs)) {
+      void playReminderSound(prefs.reminderSound);
+    }
+  }, [currentTask?.id, loading, prefs]);
+
   const handleMarkDone = async () => {
     if (!currentTask) return;
     try {
@@ -93,146 +108,70 @@ export function PatientHomeScreen({
 
   if (!patientId) {
     return (
-      <div
-        className="min-h-screen flex flex-col text-gray-900 bg-[#FAFAF9] items-center justify-center p-8"
-        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
-      >
-        <div className="card p-8 rounded-2xl border-2 border-gray-300 bg-white shadow-card max-w-md w-full text-center">
-          <Link2 className="w-16 h-16 text-blue-600 mx-auto mb-4" aria-hidden />
-          <h2 className="text-2xl font-bold text-gray-900 mb-3">Link your account</h2>
-          <p className="text-lg text-gray-600 mb-6 leading-relaxed">
-            Enter the code from your caregiver to see your reminders here.
-          </p>
-          <button
-            type="button"
-            onClick={onLinkAccount}
-            className="w-full py-5 px-6 text-xl font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-2xl"
-          >
-            Enter linking code
-          </button>
-          <button
-            type="button"
-            onClick={onSettings}
-            className="mt-4 text-lg font-medium text-gray-600 hover:text-gray-900 flex items-center justify-center gap-2 mx-auto"
-          >
-            <Settings className="w-5 h-5" /> Settings
-          </button>
+      <div className="patient-screen" data-text-size={prefs.textSize}>
+        <div className="page-shell" style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center' }}>
+          <LogoMark size="lg" className="mb-6" />
+          <PageTitle title="Link your account" subtitle="Enter the code from your caregiver to see reminders here." />
+          <div className="stack">
+            <Button className="w-full" onClick={onLinkAccount}>
+              Enter linking code
+            </Button>
+            <Button variant="ghost" className="w-full" onClick={onSettings}>
+              Settings
+            </Button>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div
-      className="min-h-screen flex flex-col text-gray-900 bg-[#FAFAF9]"
-      style={{
-        paddingBottom: 'env(safe-area-inset-bottom)',
-      }}
-    >
-      <header
-        className="flex-shrink-0 border-b border-gray-200 bg-[#FAFAF9]"
-        style={{
-          paddingTop: 'max(1rem, env(safe-area-inset-top))',
-          paddingLeft: 'max(1.5rem, env(safe-area-inset-left))',
-          paddingRight: 'max(1.5rem, env(safe-area-inset-right))',
-          paddingBottom: '1rem',
-        }}
-      >
-        <p className="text-2xl font-bold text-gray-900 leading-tight">
-          {formatTime(now)}
-        </p>
-        <p className="text-xl font-bold text-gray-900 mt-1 leading-tight">
-          {formatDate(now)}
-        </p>
-        {patientName && (
-          <p className="text-lg text-gray-600 mt-2">Hi, {patientName}</p>
-        )}
-        <button
-          type="button"
-          onClick={onSettings}
-          className="mt-4 flex items-center gap-2 text-lg font-medium text-gray-600 hover:text-gray-900"
-          aria-label="Open settings"
-        >
-          <Settings className="w-5 h-5" /> Settings
-        </button>
+    <div className="patient-screen" data-text-size={prefs.textSize}>
+      <header className="patient-header">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <LogoMark size="sm" className="flex-shrink-0 mt-0.5" />
+            <div>
+            <p className="patient-time">{formatTime(now)}</p>
+            <p className="patient-date">{formatDate(now)}</p>
+            {patientName && <p className="patient-greeting">Hi, {patientName}</p>}
+            </div>
+          </div>
+          <Button variant="ghost" onClick={onSettings}>
+            Settings
+          </Button>
+        </div>
       </header>
 
-      <main
-        className="flex-1 flex flex-col min-h-0 overflow-auto"
-        style={{
-          paddingLeft: 'max(1.5rem, env(safe-area-inset-left))',
-          paddingRight: 'max(1.5rem, env(safe-area-inset-right))',
-          paddingTop: '1.5rem',
-          paddingBottom: '1.5rem',
-        }}
-      >
-        <h2 className="text-xl font-bold text-gray-900 mb-3">Current Task</h2>
+      <main className="patient-main">
+        <SectionLabel>Current task</SectionLabel>
 
-        {error && (
-          <div className="mb-4 p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-lg">
-            {error}
-          </div>
-        )}
+        {error && <ErrorBanner message={error} />}
 
         {loading ? (
           <CurrentTaskCardSkeleton />
         ) : currentTask ? (
-          <div className="card p-6 rounded-2xl border-2 border-gray-300 bg-white shadow-card">
-            <div className="flex flex-col items-center gap-5">
-              {currentTask.photoUrl ? (
-                <img
-                  src={currentTask.photoUrl}
-                  alt=""
-                  className="w-24 h-24 object-cover rounded-2xl border-2 border-gray-300 flex-shrink-0"
-                />
-              ) : (
-                <ListTodo
-                  className="w-20 h-20 text-gray-900 flex-shrink-0"
-                  strokeWidth={2}
-                  aria-hidden
-                />
-              )}
-              <p className="text-2xl font-bold text-gray-900 text-center">{currentTask.title}</p>
-              <p className="text-xl text-gray-700">at {currentTask.time}</p>
-              <button
-                type="button"
-                onClick={handleMarkDone}
-                className="w-full py-5 px-6 text-2xl font-bold bg-green-600 hover:bg-green-700 text-white rounded-2xl border-4 border-green-800 transition-colors"
-              >
-                Mark as Done
-              </button>
-            </div>
-          </div>
+          <Card className="task-card">
+            {currentTask.photoUrl && (
+              <img src={currentTask.photoUrl} alt="" className="task-photo" />
+            )}
+            <p className="task-title">{currentTask.title}</p>
+            <p className="task-time">at {currentTask.time}</p>
+            <Button className="w-full mt-4" onClick={handleMarkDone}>
+              Mark as done
+            </Button>
+          </Card>
         ) : (
-          <div className="card p-6 rounded-2xl border-2 border-green-200 bg-green-50/80 shadow-card">
-            <div className="flex flex-col items-center gap-4">
-              <Sun
-                className="w-16 h-16 text-green-600 flex-shrink-0"
-                strokeWidth={2}
-                aria-hidden
-              />
-              <p className="text-xl font-bold text-gray-900 text-center leading-relaxed">
-                Relax, you are all caught up
-              </p>
-            </div>
-          </div>
+          <Card className="task-card task-card--empty">
+            <p className="task-title">All caught up</p>
+            <p className="task-time">No reminders right now.</p>
+          </Card>
         )}
       </main>
 
-      <footer
-        className="flex-shrink-0 border-t border-gray-200 bg-[#FAFAF9]"
-        style={{
-          paddingLeft: 'max(1.5rem, env(safe-area-inset-left))',
-          paddingRight: 'max(1.5rem, env(safe-area-inset-right))',
-          paddingTop: '1rem',
-          paddingBottom: 'max(1rem, env(safe-area-inset-bottom))',
-        }}
-      >
-        <a
-          href={helpHref}
-          className="btn-help flex items-center justify-center gap-2 w-full py-4 px-5 text-lg font-bold rounded-2xl min-h-[56px] transition-colors bg-red-600 text-white border-2 border-red-700 hover:bg-red-700 hover:border-red-800"
-        >
-          <Phone className="w-6 h-6 flex-shrink-0 text-white" aria-hidden /> Help
+      <footer className="patient-footer">
+        <a href={helpHref} className="btn btn-danger w-full">
+          Call for help
         </a>
       </footer>
     </div>

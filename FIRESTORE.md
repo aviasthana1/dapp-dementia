@@ -8,6 +8,10 @@ CareConnect uses these Firestore collections. They are created automatically whe
 | `patients`       | patient id       | `name`, `caregiverId`                       |
 | `reminders`      | reminder id      | `patientId`, `title`, `time`, `done`         |
 | `linkingCodes`    | code (uppercase) | `patientId`, `patientName`                  |
+| `rooms`           | `room_1` … `room_7` | `roomId`, `name`, `occupancy`, `lastEntry`, `lastExit` |
+| `rooms/…/events`| auto id          | `type`, `roomId`, `roomName`, `timestamp` (ESP32 POST) |
+| `hubConfig`       | `default`        | `patientId`, `enabled` (which patient gets mirrored location) |
+| `patients/…/location` | auto id      | `room`, `time` (UI + ESP32 mirror)          |
 
 **Firebase config** is in `src/services/firebase.ts` (apiKey, projectId, etc.).
 
@@ -23,4 +27,8 @@ CareConnect uses these Firestore collections. They are created automatically whe
 
 1. Open Firebase Console → your project → **Firestore Database** → **Rules**.
 2. Replace with the contents of **firestore.rules** in this repo, then **Publish**.
-3. Rules in that file allow read/write for `caregivers`, `patients`, `reminders`, `linkingCodes` (development only).
+3. Rules in that file allow read/write for `caregivers`, `patients`, `reminders`, `linkingCodes`, `rooms`, `hubConfig` (development only).
+
+## ESP32 BLE hub
+
+See **[ESP32_BLE_HUB.md](./ESP32_BLE_HUB.md)** for firmware requirements, Firestore paths, rules, and testing.

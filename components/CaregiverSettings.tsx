@@ -5,8 +5,9 @@ import {
   getLinkingCodesForPatients,
 } from '../src/services/firestoreData';
 import type { Patient, LinkingCode } from '../src/services/firestoreData';
-import { ArrowLeft, Settings, Bell, Users, Key } from 'lucide-react';
+import { getHubPatientId, setHubPatientId } from '../src/services/roomTracking';
 import { PatientListSkeleton } from './Skeleton';
+import { BackButton, Card, ErrorBanner, Field, Page, PageTitle, SectionLabel } from './ui';
 
 type CaregiverSettingsProps = {
   caregiverEmail: string;
@@ -24,6 +25,7 @@ export function CaregiverSettings({
   const [linkingCodes, setLinkingCodes] = useState<LinkingCode[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hubPatientId, setHubPatientIdState] = useState<string>('');
 
   useEffect(() => {
     let cancelled = false;
@@ -43,6 +45,10 @@ export function CaregiverSettings({
         const codes = await getLinkingCodesForPatients(patientList.map((p) => p.id));
         if (cancelled) return;
         setLinkingCodes(codes);
+
+        const hubId = await getHubPatientId();
+        if (cancelled) return;
+        setHubPatientIdState(hubId ?? '');
       } catch (err) {
         if (!cancelled) setError((err as Error)?.message ?? 'Failed to load settings');
       } finally {
@@ -56,96 +62,95 @@ export function CaregiverSettings({
   }, [caregiverEmail]);
 
   return (
-    <div className="min-h-screen app-page p-8 max-w-xl mx-auto">
-      <button
-        onClick={onBack}
-        className="btn-big w-full mb-6 border-2 border-gray-300 text-gray-800 bg-white hover:bg-gray-50 rounded-2xl flex items-center justify-center gap-2 shadow-sm"
-      >
-        <ArrowLeft className="w-6 h-6" /> Back
-      </button>
+    <Page>
+      <BackButton onClick={onBack} />
+      <PageTitle
+        title="Settings"
+        subtitle={`${name ?? 'Caregiver'} · ${caregiverEmail}`}
+      />
 
-      <div className="card p-6 mb-8">
-        <h2 className="heading-big mb-2 flex items-center gap-2">
-          <Settings className="w-8 h-8 text-blue-600" /> Settings
-        </h2>
-        <p className="text-xl text-gray-600 mb-1">
-          {name ?? 'Caregiver'} — {caregiverEmail}
-        </p>
-        <p className="text-base text-gray-500">
-          Manage your account and how reminders work.
-        </p>
-      </div>
+      {error && <ErrorBanner message={error} />}
 
-      {error && (
-        <div className="p-4 mb-6 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xl">
-          {error}
-        </div>
-      )}
-
-      <p className="section-title">Notifications</p>
-      <div className="card p-6 rounded-2xl mb-6">
-        <p className="text-xl font-semibold text-gray-900 mb-2 flex items-center gap-2">
-          <Bell className="w-6 h-6 text-blue-600" /> Reminder alerts
+      <SectionLabel>BLE hub</SectionLabel>
+      <Card className="mb-4">
+        <p className="text-sm text-muted mb-3">
+          ESP32 hub ENTRY events are copied into this patient&apos;s location history.
         </p>
-        <p className="text-base text-gray-600">
-          Patients see reminders you add on their dashboard. When they mark one done, it updates in Firestore automatically.
-        </p>
-      </div>
+        {loading ? (
+          <p className="text-sm text-muted">Loading…</p>
+        ) : (
+          <Field label="Tracked patient">
+            <select
+              className="input"
+              value={hubPatientId}
+              onChange={(e) => {
+                const id = e.target.value;
+                setHubPatientIdState(id);
+                void setHubPatientId(id || null);
+              }}
+            >
+              <option value="">None</option>
+              {patients.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
+      </Card>
 
-      <p className="section-title">Patients & linking</p>
+      <SectionLabel>Reminders</SectionLabel>
+      <Card className="mb-4">
+        <p className="text-sm text-muted">
+          When a patient marks a reminder done, it updates automatically in Firestore.
+        </p>
+      </Card>
+
+      <SectionLabel>Patients</SectionLabel>
       {loading ? (
         <PatientListSkeleton count={3} />
       ) : (
         <>
-          <div className="card p-6 rounded-2xl mb-6">
-            <p className="text-xl font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <Users className="w-6 h-6 text-blue-600" /> Your patients
-            </p>
-            {patients.length === 0 ? (
-              <p className="text-base text-gray-600">No patients assigned to this caregiver yet.</p>
-            ) : (
-              <ul className="space-y-3">
-                {patients.map((p) => (
-                  <li key={p.id}>
-                    <button
-                      type="button"
-                      onClick={() => onSelectPatient(p.id, p.name)}
-                      className="w-full text-left py-3 px-4 rounded-xl border-2 border-gray-200 hover:border-blue-300 hover:bg-blue-50/50 text-lg font-semibold text-gray-900"
-                    >
-                      {p.name}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
+          {patients.length === 0 ? (
+            <p className="text-sm text-muted mb-4">No patients assigned yet.</p>
+          ) : (
+            <ul className="stack mb-4">
+              {patients.map((p) => (
+                <li key={p.id}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectPatient(p.id, p.name)}
+                    className="list-row"
+                  >
+                    {p.name}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
 
-          <div className="card p-6 rounded-2xl">
-            <p className="text-xl font-semibold text-gray-900 mb-2 flex items-center gap-2">
-              <Key className="w-6 h-6 text-blue-600" /> Linking codes
-            </p>
-            <p className="text-base text-gray-600 mb-4">
-              Share a code with your patient so they can link in “My Reminders” on the home screen.
+          <SectionLabel>Linking codes</SectionLabel>
+          <Card>
+            <p className="text-sm text-muted mb-3">
+              Share a code so patients can link on the home screen.
             </p>
             {linkingCodes.length === 0 ? (
-              <p className="text-base text-gray-500">No linking codes found for your patients.</p>
+              <p className="text-sm text-muted">No codes found.</p>
             ) : (
-              <ul className="space-y-3">
+              <ul className="stack text-sm">
                 {linkingCodes.map((lc) => (
-                  <li
-                    key={lc.code}
-                    className="flex flex-wrap items-center gap-2 py-2 px-3 rounded-lg bg-gray-50 border border-gray-200"
-                  >
-                    <span className="font-mono font-bold text-lg text-gray-900">{lc.code}</span>
-                    <span className="text-gray-500">→</span>
-                    <span className="text-lg text-gray-800">{lc.patientName}</span>
+                  <li key={lc.code} className="flex items-center gap-2">
+                    <span className="font-mono font-medium">{lc.code}</span>
+                    <span className="text-muted">→</span>
+                    <span>{lc.patientName}</span>
                   </li>
                 ))}
               </ul>
             )}
-          </div>
+          </Card>
         </>
       )}
-    </div>
+    </Page>
   );
 }
