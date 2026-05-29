@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getCaregivers } from '../src/services/firestoreData';
+import { getCaregivers, getCaregiverByEmail } from '../src/services/firestoreData';
 import type { Caregiver } from '../src/services/firestoreData';
 import { ArrowLeft, User, LogIn } from 'lucide-react';
 import { CaregiverListSkeleton } from './Skeleton';
@@ -22,9 +22,21 @@ export function CaregiverLogin({ onLogin, onBack }: CaregiverLoginProps) {
       .finally(() => setLoading(false));
   }, []);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (email.trim()) onLogin(email.trim());
+    const trimmed = email.trim();
+    if (!trimmed) return;
+    setError(null);
+    try {
+      const caregiver = await getCaregiverByEmail(trimmed);
+      if (!caregiver) {
+        setError('Email not found. Pick a caregiver below or use a demo email.');
+        return;
+      }
+      onLogin(caregiver.email);
+    } catch (err) {
+      setError((err as Error)?.message ?? 'Login failed');
+    }
   };
 
   return (

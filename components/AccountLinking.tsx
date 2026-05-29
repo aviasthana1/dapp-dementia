@@ -5,7 +5,7 @@ import { ArrowLeft, Link2 } from 'lucide-react';
 import { CardBlockSkeleton } from './Skeleton';
 
 type AccountLinkingProps = {
-  onComplete: (patientId: string) => void;
+  onComplete: (patientId: string, patientName: string) => void;
   onBack: () => void;
 };
 
@@ -27,7 +27,7 @@ export function AccountLinking({ onComplete, onBack }: AccountLinkingProps) {
     setError('');
     const result = await validateLinkingCode(code);
     if (result) {
-      onComplete(result.patientId);
+      onComplete(result.patientId, result.patientName);
     } else {
       setError('Code not found. Try again.');
     }

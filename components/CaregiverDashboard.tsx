@@ -5,9 +5,10 @@ import {
   uploadReminderPhoto,
   setReminderPhotoUrl,
   getLocationHistoryForPatient,
+  deleteReminder,
 } from '../src/services/firestoreData';
 import type { Reminder, PatientLocationEvent } from '../src/services/firestoreData';
-import { ArrowLeft, Bell, Plus, LogOut, Clock, Image, X, MapPin } from 'lucide-react';
+import { ArrowLeft, Bell, Plus, LogOut, Clock, Image, X, MapPin, Trash2 } from 'lucide-react';
 import { LocationHistorySkeleton, ReminderListSkeleton } from './Skeleton';
 
 type CaregiverDashboardProps = {
@@ -86,6 +87,17 @@ export function CaregiverDashboard({
   useEffect(() => {
     loadLocationHistory();
   }, [patientId]);
+
+  const handleDeleteReminder = async (reminderId: string) => {
+    if (!window.confirm('Delete this reminder?')) return;
+    setError(null);
+    try {
+      await deleteReminder(reminderId);
+      loadReminders();
+    } catch (err) {
+      setError((err as Error)?.message ?? 'Failed to delete reminder');
+    }
+  };
 
   const handleAddReminder = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -246,8 +258,17 @@ export function CaregiverDashboard({
                   <p className="text-xl font-semibold text-gray-900">{r.title}</p>
                   <p className="text-lg text-gray-600 mt-1 flex items-center gap-1">
                     <Clock className="w-5 h-5" /> {r.time}
+                    {r.done && <span className="text-green-700 font-medium">· Done</span>}
                   </p>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => handleDeleteReminder(r.id)}
+                  className="flex-shrink-0 p-2 text-red-600 hover:bg-red-50 rounded-lg"
+                  aria-label={`Delete ${r.title}`}
+                >
+                  <Trash2 className="w-6 h-6" />
+                </button>
               </li>
             ))
           )}

@@ -1,5 +1,11 @@
 import { useState, useEffect } from 'react';
 import { seedInitialDataIfEmpty } from './src/services/firestoreData';
+import {
+  getStoredCaregiverEmail,
+  setStoredCaregiverEmail,
+  getStoredLinkedPatient,
+  setStoredLinkedPatient,
+} from './src/services/session';
 import { CaregiverLogin } from './components/CaregiverLogin';
 import { PatientSelectionDashboard } from './components/PatientSelectionDashboard';
 import { CaregiverDashboard } from './components/CaregiverDashboard';
@@ -40,16 +46,22 @@ export default function App() {
   }, []);
 
   const [currentView, setCurrentView] = useState<View>('home');
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
-  const [currentCaregiver, setCurrentCaregiver] = useState<string | null>(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(() => !!getStoredCaregiverEmail());
+  const [currentCaregiver, setCurrentCaregiver] = useState<string | null>(() => getStoredCaregiverEmail());
   const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
   const [selectedPatientName, setSelectedPatientName] = useState<string | null>(null);
-  const [linkedPatient, setLinkedPatient] = useState<string | null>(null);
+  const [linkedPatientId, setLinkedPatientId] = useState<string | null>(
+    () => getStoredLinkedPatient()?.id ?? null
+  );
+  const [linkedPatientName, setLinkedPatientName] = useState<string | null>(
+    () => getStoredLinkedPatient()?.name ?? null
+  );
   const [accountLinkReturnView, setAccountLinkReturnView] = useState<View>('home');
 
   const handleCaregiverLogin = (email: string) => {
     setIsLoggedIn(true);
     setCurrentCaregiver(email);
+    setStoredCaregiverEmail(email);
     setCurrentView('patient-selection');
   };
 
@@ -68,15 +80,24 @@ export default function App() {
   const handleLogout = () => {
     setIsLoggedIn(false);
     setCurrentCaregiver(null);
+    setStoredCaregiverEmail(null);
     setSelectedPatientId(null);
     setSelectedPatientName(null);
     setCurrentView('home');
   };
 
-  const handleLinkComplete = (patientId: string) => {
-    setLinkedPatient(patientId);
+  const handleLinkComplete = (patientId: string, patientName: string) => {
+    setLinkedPatientId(patientId);
+    setLinkedPatientName(patientName);
+    setStoredLinkedPatient(patientId, patientName);
     setCurrentView(accountLinkReturnView);
     setAccountLinkReturnView('home');
+  };
+
+  const handleUnlinkPatient = () => {
+    setLinkedPatientId(null);
+    setLinkedPatientName(null);
+    setStoredLinkedPatient(null);
   };
 
   return (
@@ -143,7 +164,13 @@ export default function App() {
             <div className="flex flex-row items-stretch justify-center gap-2 sm:gap-3 w-full max-w-[320px] px-1">
               <button
                 type="button"
-                onClick={() => setCurrentView('caregiver-login')}
+                onClick={() => {
+                  if (isLoggedIn && currentCaregiver) {
+                    setCurrentView('patient-selection');
+                  } else {
+                    setCurrentView('caregiver-login');
+                  }
+                }}
                 className="btn-landing-outline btn-landing-outline-equal rounded-xl px-3 py-3 text-sm font-medium flex-1 min-w-0 inline-flex items-center justify-center gap-2"
               >
                 <User className="w-4 h-4 flex-shrink-0" aria-hidden />
@@ -204,17 +231,25 @@ export default function App() {
 
       {currentView === 'patient' && (
         <PatientHomeScreen
+          patientId={linkedPatientId}
+          patientName={linkedPatientName}
           onSettings={() => setCurrentView('patient-settings')}
+          onLinkAccount={() => {
+            setAccountLinkReturnView('patient');
+            setCurrentView('account-linking');
+          }}
         />
       )}
 
       {currentView === 'patient-settings' && (
         <PatientSettings
+          linkedPatientName={linkedPatientName}
           onBack={() => setCurrentView('patient')}
           onLinkAccount={() => {
-            setAccountLinkReturnView('patient');
+            setAccountLinkReturnView('patient-settings');
             setCurrentView('account-linking');
           }}
+          onUnlink={handleUnlinkPatient}
         />
       )}
 

@@ -1,14 +1,20 @@
 import { useState, useEffect } from 'react';
-import { getRemindersSample, updateReminderDone } from '../src/services/firestoreData';
+import {
+  subscribeRemindersForPatient,
+  updateReminderDone,
+} from '../src/services/firestoreData';
 import type { Reminder } from '../src/services/firestoreData';
-import { ListTodo, Sun, Phone, Settings } from 'lucide-react';
+import { ListTodo, Sun, Phone, Settings, Link2 } from 'lucide-react';
 import { CurrentTaskCardSkeleton } from './Skeleton';
 
 const CAREGIVER_PHONE_KEY = 'caregiverPhone';
 const DEFAULT_CAREGIVER_PHONE = '+15551234567';
 
 type PatientHomeScreenProps = {
+  patientId: string | null;
+  patientName: string | null;
   onSettings: () => void;
+  onLinkAccount: () => void;
 };
 
 function formatTime(date: Date): string {
@@ -27,10 +33,16 @@ function formatDate(date: Date): string {
   });
 }
 
-export function PatientHomeScreen({ onSettings }: PatientHomeScreenProps) {
+export function PatientHomeScreen({
+  patientId,
+  patientName,
+  onSettings,
+  onLinkAccount,
+}: PatientHomeScreenProps) {
   const [now, setNow] = useState(new Date());
   const [reminders, setReminders] = useState<Reminder[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!!patientId);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -38,11 +50,28 @@ export function PatientHomeScreen({ onSettings }: PatientHomeScreenProps) {
   }, []);
 
   useEffect(() => {
-    getRemindersSample(20)
-      .then((list) => setReminders(list.filter((r) => !r.done)))
-      .catch(() => setReminders([]))
-      .finally(() => setLoading(false));
-  }, []);
+    if (!patientId) {
+      setReminders([]);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    const unsubscribe = subscribeRemindersForPatient(
+      patientId,
+      (list) => {
+        setReminders(list.filter((r) => !r.done));
+        setLoading(false);
+      },
+      (err) => {
+        setError(err.message ?? 'Could not load reminders');
+        setLoading(false);
+      }
+    );
+    return () => unsubscribe();
+  }, [patientId]);
 
   const currentTask = reminders[0] ?? null;
 
@@ -52,7 +81,7 @@ export function PatientHomeScreen({ onSettings }: PatientHomeScreenProps) {
       await updateReminderDone(currentTask.id);
       setReminders((prev) => prev.filter((r) => r.id !== currentTask.id));
     } catch {
-      // keep UI unchanged on error
+      setError('Could not mark reminder as done. Try again.');
     }
   };
 
@@ -62,6 +91,37 @@ export function PatientHomeScreen({ onSettings }: PatientHomeScreenProps) {
       : DEFAULT_CAREGIVER_PHONE;
   const helpHref = `tel:${caregiverPhone.replace(/\s/g, '')}`;
 
+  if (!patientId) {
+    return (
+      <div
+        className="min-h-screen flex flex-col text-gray-900 bg-[#FAFAF9] items-center justify-center p-8"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      >
+        <div className="card p-8 rounded-2xl border-2 border-gray-300 bg-white shadow-card max-w-md w-full text-center">
+          <Link2 className="w-16 h-16 text-blue-600 mx-auto mb-4" aria-hidden />
+          <h2 className="text-2xl font-bold text-gray-900 mb-3">Link your account</h2>
+          <p className="text-lg text-gray-600 mb-6 leading-relaxed">
+            Enter the code from your caregiver to see your reminders here.
+          </p>
+          <button
+            type="button"
+            onClick={onLinkAccount}
+            className="w-full py-5 px-6 text-xl font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-2xl"
+          >
+            Enter linking code
+          </button>
+          <button
+            type="button"
+            onClick={onSettings}
+            className="mt-4 text-lg font-medium text-gray-600 hover:text-gray-900 flex items-center justify-center gap-2 mx-auto"
+          >
+            <Settings className="w-5 h-5" /> Settings
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className="min-h-screen flex flex-col text-gray-900 bg-[#FAFAF9]"
@@ -69,7 +129,6 @@ export function PatientHomeScreen({ onSettings }: PatientHomeScreenProps) {
         paddingBottom: 'env(safe-area-inset-bottom)',
       }}
     >
-      {/* Top: time and date — readable size, safe area */}
       <header
         className="flex-shrink-0 border-b border-gray-200 bg-[#FAFAF9]"
         style={{
@@ -85,6 +144,9 @@ export function PatientHomeScreen({ onSettings }: PatientHomeScreenProps) {
         <p className="text-xl font-bold text-gray-900 mt-1 leading-tight">
           {formatDate(now)}
         </p>
+        {patientName && (
+          <p className="text-lg text-gray-600 mt-2">Hi, {patientName}</p>
+        )}
         <button
           type="button"
           onClick={onSettings}
@@ -95,7 +157,6 @@ export function PatientHomeScreen({ onSettings }: PatientHomeScreenProps) {
         </button>
       </header>
 
-      {/* Center: Current Task card — balanced spacing */}
       <main
         className="flex-1 flex flex-col min-h-0 overflow-auto"
         style={{
@@ -106,6 +167,12 @@ export function PatientHomeScreen({ onSettings }: PatientHomeScreenProps) {
         }}
       >
         <h2 className="text-xl font-bold text-gray-900 mb-3">Current Task</h2>
+
+        {error && (
+          <div className="mb-4 p-4 rounded-xl bg-red-50 border border-red-200 text-red-700 text-lg">
+            {error}
+          </div>
+        )}
 
         {loading ? (
           <CurrentTaskCardSkeleton />
@@ -152,7 +219,6 @@ export function PatientHomeScreen({ onSettings }: PatientHomeScreenProps) {
         )}
       </main>
 
-      {/* Bottom: Help button — clean bar, no heavy border */}
       <footer
         className="flex-shrink-0 border-t border-gray-200 bg-[#FAFAF9]"
         style={{

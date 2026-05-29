@@ -11,7 +11,13 @@ CareConnect uses these Firestore collections. They are created automatically whe
 
 **Firebase config** is in `src/services/firebase.ts` (apiKey, projectId, etc.).
 
-**Seed**: On first load, `seedInitialDataIfEmpty()` in `src/services/firestoreData.ts` writes seed data so these collections exist and have demo caregivers, patients, reminders, and linking codes.
+**Seed**: On first load, `seedInitialDataIfEmpty()` in `src/services/firestoreData.ts` writes seed data so these collections exist and have demo caregivers, patients, reminders, linking codes, and sample location history.
+
+**Patient linking**: After a patient enters a code, `patientId` is saved in `localStorage` (`src/services/session.ts`) and reminders load from Firestore for that patient only.
+
+**Demo flow**:
+1. Caregiver: log in with `maria@careconnect.example` → pick James → add reminders.
+2. Patient: Link Account with code `JAMES01` → My Reminders shows James’s tasks live.
 
 ## Fix "Missing or insufficient permissions"
 

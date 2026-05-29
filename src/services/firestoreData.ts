@@ -13,6 +13,9 @@ import {
   where,
   updateDoc,
   addDoc,
+  deleteDoc,
+  onSnapshot,
+  type Unsubscribe,
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { db, storage } from "./firebase";
@@ -98,6 +101,27 @@ export async function seedInitialDataIfEmpty(): Promise<void> {
     });
   }
   await batch.commit();
+  await seedLocationHistoryIfEmpty();
+}
+
+const SEED_LOCATION_EVENTS: { patientId: string; id: string; room: string; time: number }[] = [
+  { patientId: "p1", id: "loc1", room: "Living room", time: Date.now() - 3_600_000 },
+  { patientId: "p1", id: "loc2", room: "Kitchen", time: Date.now() - 7_200_000 },
+  { patientId: "p2", id: "loc1", room: "Bedroom", time: Date.now() - 1_800_000 },
+];
+
+async function seedLocationHistoryIfEmpty(): Promise<void> {
+  const batch = writeBatch(db);
+  let hasWrites = false;
+  for (const { patientId, id, room, time } of SEED_LOCATION_EVENTS) {
+    const locRef = doc(db, COLLECTIONS.PATIENTS, patientId, "location", id);
+    const snap = await getDoc(locRef);
+    if (!snap.exists()) {
+      batch.set(locRef, { room, time });
+      hasWrites = true;
+    }
+  }
+  if (hasWrites) await batch.commit();
 }
 
 export async function getCaregivers(): Promise<Caregiver[]> {
@@ -108,6 +132,12 @@ export async function getCaregivers(): Promise<Caregiver[]> {
 export async function getCaregiverByEmail(email: string): Promise<Caregiver | undefined> {
   const caregivers = await getCaregivers();
   return caregivers.find((c) => c.email === email);
+}
+
+export async function getPatientById(patientId: string): Promise<Patient | undefined> {
+  const snap = await getDoc(doc(db, COLLECTIONS.PATIENTS, patientId));
+  if (!snap.exists()) return undefined;
+  return { id: snap.id, ...snap.data() } as Patient;
 }
 
 export async function getPatientsForCaregiver(caregiverEmail: string): Promise<Patient[]> {
@@ -141,16 +171,43 @@ export async function validateLinkingCode(code: string): Promise<LinkingCode | u
   return { code: id, patientId: data.patientId, patientName: data.patientName };
 }
 
-/** Get first N reminders (for patient view when no patient id in context). */
-export async function getRemindersSample(limit: number): Promise<Reminder[]> {
-  const snap = await getDocs(collection(db, COLLECTIONS.REMINDERS));
-  const list = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Reminder));
-  return list.sort((a, b) => a.time.localeCompare(b.time)).slice(0, limit);
+export async function getLinkingCodesForPatients(patientIds: string[]): Promise<LinkingCode[]> {
+  if (patientIds.length === 0) return [];
+  const snap = await getDocs(collection(db, COLLECTIONS.LINKING_CODES));
+  const idSet = new Set(patientIds);
+  return snap.docs
+    .map((d) => ({ code: d.id, ...d.data() } as LinkingCode))
+    .filter((lc) => idSet.has(lc.patientId));
+}
+
+/** Live updates when caregiver adds or patient completes reminders. */
+export function subscribeRemindersForPatient(
+  patientId: string,
+  onUpdate: (reminders: Reminder[]) => void,
+  onError?: (err: Error) => void
+): Unsubscribe {
+  const q = query(
+    collection(db, COLLECTIONS.REMINDERS),
+    where("patientId", "==", patientId)
+  );
+  return onSnapshot(
+    q,
+    (snap) => {
+      const list = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Reminder));
+      onUpdate(list.sort((a, b) => a.time.localeCompare(b.time)));
+    },
+    (err) => onError?.(err)
+  );
 }
 
 export async function getLinkingCodesForDemo(): Promise<LinkingCode[]> {
   const snap = await getDocs(collection(db, COLLECTIONS.LINKING_CODES));
   return snap.docs.map((d) => ({ code: d.id, ...d.data() } as LinkingCode));
+}
+
+/** Remove a reminder (caregiver dashboard). */
+export async function deleteReminder(reminderId: string): Promise<void> {
+  await deleteDoc(doc(db, COLLECTIONS.REMINDERS, reminderId));
 }
 
 /** Mark a reminder as done. */
@@ -246,4 +303,15 @@ export async function getLocationHistoryForPatient(patientId: string): Promise<P
     .filter((e) => Number.isFinite(e.time));
 
   return events;
+}
+
+/** Record a location event for caregiver location history. */
+export async function addLocationEvent(
+  patientId: string,
+  room: string,
+  time: number = Date.now()
+): Promise<string> {
+  const locRef = collection(db, COLLECTIONS.PATIENTS, patientId, "location");
+  const docRef = await addDoc(locRef, { room, time });
+  return docRef.id;
 }
