@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { seedInitialDataIfEmpty } from './src/services/firestoreData';
+import { firebaseProjectId } from './src/services/firebase';
 import {
   getStoredCaregiverEmail,
   setStoredCaregiverEmail,
@@ -93,7 +94,7 @@ export default function App() {
           <p>{firebaseError}</p>
           <div className="flex gap-3 text-sm">
             <a
-              href="https://console.firebase.google.com/project/test-f80e2/firestore/rules"
+              href={`https://console.firebase.google.com/project/${firebaseProjectId}/firestore/rules`}
               target="_blank"
               rel="noopener noreferrer"
               className="font-medium underline"

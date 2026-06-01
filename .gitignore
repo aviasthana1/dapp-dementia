@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build output (may embed VITE_* env at build time)
+build/
+dist/
+
+# Secrets — never commit
+.env
+.env.local
+.env.*.local
+firmware/esp32_hub/secrets.h
+
+# OS / editor
+.DS_Store
+*.log
+
+# Vite
+.vite/

@@ -2,8 +2,11 @@
  * POST a test ENTRY to rooms/room_1/events (same path as ESP32 logEvent).
  * Run: node scripts/test-hub-event.mjs
  */
-const PROJECT_ID = 'test-f80e2';
-const API_KEY = 'AIzaSyBIgGJPopOg1EtXJk5hOfE43Wy4dT1OZ8A';
+import { loadEnv, requireEnv } from "./load-env.mjs";
+
+loadEnv();
+const PROJECT_ID = requireEnv("VITE_FIREBASE_PROJECT_ID");
+const API_KEY = requireEnv("VITE_FIREBASE_API_KEY");
 
 const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents/rooms/room_1/events?key=${API_KEY}`;
 

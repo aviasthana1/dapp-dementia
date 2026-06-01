@@ -13,7 +13,7 @@ CareConnect uses these Firestore collections. They are created automatically whe
 | `hubConfig`       | `default`        | `patientId`, `enabled` (which patient gets mirrored location) |
 | `patients/…/location` | auto id      | `room`, `time` (UI + ESP32 mirror)          |
 
-**Firebase config** is in `src/services/firebase.ts` (apiKey, projectId, etc.).
+**Firebase config** is in `.env` (see `.env.example`). `src/services/firebase.ts` reads `VITE_FIREBASE_*` at build time — do not commit `.env`.
 
 **Seed**: On first load, `seedInitialDataIfEmpty()` in `src/services/firestoreData.ts` writes seed data so these collections exist and have demo caregivers, patients, reminders, linking codes, and sample location history.
 

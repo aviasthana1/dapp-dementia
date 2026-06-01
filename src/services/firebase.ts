@@ -4,16 +4,28 @@ import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getStorage } from "firebase/storage";
 
+function requireEnv(name: keyof ImportMetaEnv): string {
+  const value = import.meta.env[name];
+  if (!value) {
+    throw new Error(
+      `Missing ${name}. Copy .env.example to .env and add your Firebase web app config.`
+    );
+  }
+  return value;
+}
+
 const firebaseConfig = {
-  apiKey: "AIzaSyBIgGJPopOg1EtXJk5hOfE43Wy4dT1OZ8A",
-  authDomain: "test-f80e2.firebaseapp.com",
-  projectId: "test-f80e2",
-  storageBucket: "test-f80e2.firebasestorage.app",
-  messagingSenderId: "998655559449",
-  appId: "1:998655559449:web:7cf8fe76af797e7904e788",
+  apiKey: requireEnv("VITE_FIREBASE_API_KEY"),
+  authDomain: requireEnv("VITE_FIREBASE_AUTH_DOMAIN"),
+  projectId: requireEnv("VITE_FIREBASE_PROJECT_ID"),
+  storageBucket: requireEnv("VITE_FIREBASE_STORAGE_BUCKET"),
+  messagingSenderId: requireEnv("VITE_FIREBASE_MESSAGING_SENDER_ID"),
+  appId: requireEnv("VITE_FIREBASE_APP_ID"),
 };
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
+
+export const firebaseProjectId = firebaseConfig.projectId;

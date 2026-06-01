@@ -9,7 +9,7 @@ Your hub firmware writes BLE door crossings to Firestore via the REST API and AP
 | Firestore rules allow **unauthenticated writes** to `rooms/**` | `firestore.rules` — publish in Firebase Console |
 | Parent docs `rooms/room_1` … `room_7` exist (PATCH needs a document) | Seeded on first app load via `seedRoomsIfEmpty()` |
 | `events` subcollection | Created automatically on first POST from ESP32 |
-| API key matches project | Same key as `src/services/firebase.ts` |
+| API key matches project | Same key in `.env` (`VITE_FIREBASE_API_KEY`) and `firmware/esp32_hub/secrets.h` |
 | WiFi connected | ESP32 + WiFiManager |
 
 ### Publish Firestore rules

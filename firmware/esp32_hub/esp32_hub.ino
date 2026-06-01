@@ -17,6 +17,14 @@
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <time.h>
+#include "secrets.h"
+
+#ifndef FIREBASE_PROJECT_ID
+#error "Copy secrets.h.example to secrets.h and set FIREBASE_PROJECT_ID"
+#endif
+#ifndef FIREBASE_API_KEY
+#error "Copy secrets.h.example to secrets.h and set FIREBASE_API_KEY"
+#endif
 
 // --- Pins (your wiring) ---
 #define RESET_PIN      D2
@@ -24,12 +32,10 @@
 #define LED_RED        D3
 #define WIFI_CHECK_MS  10000
 
-// --- Firebase (must match src/services/firebase.ts) ---
-#define FIREBASE_PROJECT_ID  "test-f80e2"
-#define FIREBASE_API_KEY     "AIzaSyBIgGJPopOg1EtXJk5hOfE43Wy4dT1OZ8A"
+// Firebase project + API key: firmware/esp32_hub/secrets.h (not committed)
 
-// Post one test event after WiFi connects (proves Firestore from the board)
-#define TEST_FIRESTORE_ON_BOOT  false
+// Post one test event after WiFi connects — you MUST see [FIREBASE] on boot if WiFi works
+#define TEST_FIRESTORE_ON_BOOT  true
 
 // Print every manufacturer-data packet (helps debug room 2 switch)
 #define DEBUG_BLE_RAW  true
@@ -46,6 +52,8 @@ struct {
   uint8_t roomId;
   uint8_t direction;
 } pendingEvent;
+
+WiFiClientSecure secureClient;
 
 /** Sync wall-clock time over NTP (for real Firestore timestamps). */
 void syncNtpTime() {
@@ -90,7 +98,7 @@ void setLED(bool connected) {
   digitalWrite(LED_RED, connected ? LOW : HIGH);
 }
 
-String getRoomName(uint8_t roomId) {
+const char* getRoomName(uint8_t roomId) {
   switch (roomId) {
     case 1: return "Bathroom";
     case 2: return "Kitchen";
@@ -105,7 +113,7 @@ String getRoomName(uint8_t roomId) {
 
 /** Build Firestore REST "fields" object (ArduinoJson-safe nesting). */
 void writeFirestoreFields(JsonDocument& doc, const char* type, uint8_t roomId,
-                          const String& roomName, unsigned long timestampSec,
+                          const char* roomName, unsigned long timestampSec,
                           const char* timeLocal) {
   JsonObject fields = doc.createNestedObject("fields");
 
@@ -116,7 +124,7 @@ void writeFirestoreFields(JsonDocument& doc, const char* type, uint8_t roomId,
   fRoomId["integerValue"] = String(roomId);
 
   JsonObject fName = fields.createNestedObject("roomName");
-  fName["stringValue"] = roomName;
+  fName["stringValue"] = roomName;  // const char*
 
   JsonObject fTime = fields.createNestedObject("timestamp");
   fTime["integerValue"] = String(timestampSec);
@@ -152,30 +160,44 @@ void printHttpResult(HTTPClient& http, int code, const char* label) {
   }
 }
 
-bool postJson(const String& url, const String& jsonBody, const char* label) {
-  WiFiClientSecure client;
-  client.setInsecure();
+bool postJson(const char* url, const char* jsonBody, const char* label) {
+  Serial.println("[FIREBASE] logEvent called");
+  Serial.printf("[FIREBASE] WiFi status: %d (3 = connected)\n", WiFi.status());
+  Serial.printf("[FIREBASE] POST url: %s\n", url);
+  Serial.println("[FIREBASE] Sending HTTPS POST (up to 20 sec)...");
+  Serial.flush();
+
+  secureClient.setInsecure();
+  secureClient.setTimeout(25);
 
   HTTPClient http;
   http.setTimeout(20000);
-  if (!http.begin(client, url)) {
+  http.setReuse(false);
+  if (!http.begin(secureClient, url)) {
     Serial.printf("[FIREBASE] %s — http.begin failed\n", label);
     return false;
   }
   http.addHeader("Content-Type", "application/json");
+
   int code = http.POST(jsonBody);
+
+  Serial.println("[FIREBASE] POST returned");
+  Serial.flush();
   printHttpResult(http, code, label);
   http.end();
   return code >= 200 && code < 300;
 }
 
-bool patchJson(const String& url, const String& jsonBody, const char* label) {
-  WiFiClientSecure client;
-  client.setInsecure();
+bool patchJson(const char* url, const char* jsonBody, const char* label) {
+  Serial.printf("[FIREBASE] PATCH url: %s\n", url);
+  Serial.flush();
+
+  secureClient.setInsecure();
+  secureClient.setTimeout(25);
 
   HTTPClient http;
   http.setTimeout(20000);
-  if (!http.begin(client, url)) {
+  if (!http.begin(secureClient, url)) {
     Serial.printf("[FIREBASE] %s — http.begin failed\n", label);
     return false;
   }
@@ -186,7 +208,10 @@ bool patchJson(const String& url, const String& jsonBody, const char* label) {
   return code >= 200 && code < 300;
 }
 
-bool logEvent(uint8_t roomId, const String& roomName, const String& event) {
+bool logEvent(uint8_t roomId, const char* roomName, const char* eventType) {
+  Serial.println("[FIREBASE] ---- logEvent START ----");
+  Serial.flush();
+
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("[FIREBASE] logEvent skipped — no WiFi");
     return false;
@@ -194,51 +219,47 @@ bool logEvent(uint8_t roomId, const String& roomName, const String& event) {
 
   unsigned long timestampSec = nowEpochSec();
   String timeLocal = formatNowLocal();
-  logTimestamp("Firestore event");
 
   StaticJsonDocument<512> doc;
-  writeFirestoreFields(doc, event.c_str(), roomId, roomName, timestampSec, timeLocal.c_str());
+  writeFirestoreFields(doc, eventType, roomId, roomName, timestampSec, timeLocal.c_str());
 
-  String body;
-  serializeJson(doc, body);
+  char body[400];
+  serializeJson(doc, body, sizeof(body));
 
-  String url = "https://firestore.googleapis.com/v1/projects/";
-  url += FIREBASE_PROJECT_ID;
-  url += "/databases/(default)/documents/rooms/room_";
-  url += String(roomId);
-  url += "/events?key=";
-  url += FIREBASE_API_KEY;
+  char url[320];
+  snprintf(url, sizeof(url),
+           "https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents/rooms/room_%u/events?key=%s",
+           FIREBASE_PROJECT_ID, roomId, FIREBASE_API_KEY);
 
-  Serial.printf("[FIREBASE] POST room_%d/events timestamp=%lu\n", roomId, timestampSec);
+  Serial.printf("[FIREBASE] POST room_%u/events ts=%lu\n", roomId, timestampSec);
   Serial.println(body);
+  Serial.flush();
   return postJson(url, body, "logEvent");
 }
 
-bool updateRoom(uint8_t roomId, const String& event) {
+bool updateRoom(uint8_t roomId, const char* eventType) {
+  Serial.println("[FIREBASE] ---- updateRoom START ----");
+  Serial.flush();
   if (WiFi.status() != WL_CONNECTED) return false;
 
   unsigned long timestampSec = nowEpochSec();
-  const char* fieldMask = (event == "ENTRY") ? "lastEntry" : "lastExit";
+  const char* fieldMask = (strcmp(eventType, "ENTRY") == 0) ? "lastEntry" : "lastExit";
 
   StaticJsonDocument<256> doc;
   JsonObject fields = doc.createNestedObject("fields");
   JsonObject f = fields.createNestedObject(fieldMask);
   f["integerValue"] = String(timestampSec);
 
-  String body;
-  serializeJson(doc, body);
+  char body[200];
+  serializeJson(doc, body, sizeof(body));
 
-  String url = "https://firestore.googleapis.com/v1/projects/";
-  url += FIREBASE_PROJECT_ID;
-  url += "/databases/(default)/documents/rooms/room_";
-  url += String(roomId);
-  url += "?updateMask.fieldPaths=";
-  url += fieldMask;
-  url += "&key=";
-  url += FIREBASE_API_KEY;
+  char url[320];
+  snprintf(url, sizeof(url),
+           "https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents/rooms/room_%u?updateMask.fieldPaths=%s&key=%s",
+           FIREBASE_PROJECT_ID, roomId, fieldMask, FIREBASE_API_KEY);
 
-  Serial.printf("[FIREBASE] PATCH room_%d %s timestamp=%lu\n",
-                roomId, fieldMask, timestampSec);
+  Serial.printf("[FIREBASE] PATCH room_%u %s ts=%lu\n", roomId, fieldMask, timestampSec);
+  Serial.flush();
   return patchJson(url, body, "updateRoom");
 }
 
@@ -252,12 +273,15 @@ void queueBleEvent(uint8_t roomId, uint8_t direction) {
 
 void processPendingEvent() {
   if (!pendingEvent.ready) return;
-  pendingEvent.ready = false;
 
+  Serial.println("[FIREBASE] ---- processPendingEvent ----");
+  Serial.flush();
+
+  pendingEvent.ready = false;
   uint8_t roomId = pendingEvent.roomId;
   uint8_t direction = pendingEvent.direction;
-  String roomName = getRoomName(roomId);
-  String event = (direction == 1) ? "ENTRY" : "EXIT";
+  const char* roomName = getRoomName(roomId);
+  const char* eventType = (direction == 1) ? "ENTRY" : "EXIT";
 
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("[FIREBASE] *** SKIPPED — WiFi not connected ***");
@@ -265,12 +289,12 @@ void processPendingEvent() {
   }
 
   Serial.println("==========================");
-  Serial.printf("[EVENT] %s — %s (room %d)\n", event.c_str(), roomName.c_str(), roomId);
-  logTimestamp("Uploading");
+  Serial.printf("[EVENT] %s — %s (room %u)\n", eventType, roomName, roomId);
   Serial.printf("[FIREBASE] Project: %s\n", FIREBASE_PROJECT_ID);
+  Serial.flush();
 
-  bool saved = logEvent(roomId, roomName, event);
-  bool patched = updateRoom(roomId, event);
+  bool saved = logEvent(roomId, roomName, eventType);
+  bool patched = updateRoom(roomId, eventType);
 
   if (saved) {
     Serial.printf("[FIREBASE] *** SAVED *** Check: rooms/room_%d/events\n", roomId);
@@ -281,10 +305,6 @@ void processPendingEvent() {
     Serial.println("[FIREBASE] Room PATCH failed (events may still exist if POST OK)");
   }
   Serial.println("==========================");
-}
-
-void handleEvent(uint8_t roomId, uint8_t direction) {
-  queueBleEvent(roomId, direction);
 }
 
 void firestoreBootTest() {
@@ -356,7 +376,7 @@ class AdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
     Serial.printf("[BLE] RoomID=%d Direction=%s\n",
                   roomId, direction == 1 ? "ENTRY" : "EXIT");
     logTimestamp("BLE detected");
-    handleEvent(roomId, direction);
+    queueBleEvent(roomId, direction);
   }
 };
 
@@ -372,6 +392,15 @@ void connectWifi() {
   }
   Serial.printf("[WIFI] Connected — IP: %s\n", WiFi.localIP().toString().c_str());
   setLED(true);
+
+  IPAddress dnsIp;
+  if (WiFi.hostByName("firestore.googleapis.com", dnsIp)) {
+    Serial.printf("[WIFI] DNS OK — firestore.googleapis.com → %s\n", dnsIp.toString().c_str());
+  } else {
+    Serial.println("[WIFI] DNS FAILED for firestore.googleapis.com");
+    Serial.println("[WIFI] Try phone hotspot — campus WiFi may block Google/Firebase");
+  }
+
   syncNtpTime();
 }
 
@@ -410,6 +439,7 @@ void setup() {
   pBLEScan->setInterval(100);
   pBLEScan->setWindow(99);
 
+  Serial.println("[BOOT] Hub firmware v3 (Firebase runs in loop, not BLE callback)");
   Serial.println("[BOOT] Hub ready — scanning BLE");
   Serial.printf("[BOOT] Project: %s\n", FIREBASE_PROJECT_ID);
   Serial.println("[BOOT] Expect packets: [roomId][dir][0] or [coId][coId][roomId][dir][0]");
@@ -442,4 +472,7 @@ void loop() {
 
   BLEScanResults results = pBLEScan->start(1, false);
   pBLEScan->clearResults();
+
+  // Upload right after BLE scan (don't wait for next loop tick)
+  processPendingEvent();
 }
