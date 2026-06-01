@@ -1,40 +1,12 @@
 rules_version = '2';
-// CareConnect Firestore Security Rules
-// Copy this into Firebase Console → Firestore Database → Rules → Edit rules → Publish
+// DEMO ONLY — allows unauthenticated read/write (web app + ESP32 REST API).
+// ESP32 uses ?key=API_KEY with no Firebase Auth (request.auth is null).
+// Publish: Firebase Console → Firestore → Rules → Paste → Publish
+// Lock down before production (e.g. require auth or App Check).
 
 service cloud.firestore {
   match /databases/{database}/documents {
-    // CareConnect collections: allow read/write for development.
-    // Your app does not use Firebase Auth yet, so these rules allow
-    // unauthenticated access. Tighten when you add Auth (e.g. allow read, write: if request.auth != null).
-    match /caregivers/{id} {
-      allow read, write: if true;
-    }
-    match /patients/{id} {
-      allow read, write: if true;
-    }
-    // Allow any nested documents/subcollections under a patient (e.g. location history).
-    match /patients/{id}/{document=**} {
-      allow read, write: if true;
-    }
-    match /patients/{id}/location/{eventId} {
-      allow read, write: if true;
-    }
-    match /reminders/{id} {
-      allow read, write: if true;
-    }
-    match /linkingCodes/{id} {
-      allow read, write: if true;
-    }
-
-    // ESP32 BLE hub (REST API + API key, no Firebase Auth) — demo only
-    match /rooms/{roomId} {
-      allow read, write: if true;
-      match /events/{eventId} {
-        allow read, write: if true;
-      }
-    }
-    match /hubConfig/{id} {
+    match /{document=**} {
       allow read, write: if true;
     }
   }

@@ -54,6 +54,8 @@
       },
       "scripts": {
             "dev": "vite",
-            "build": "vite build"
+            "build": "vite build",
+            "seed:hub": "node scripts/seed-hub-firestore.mjs",
+            "test:hub-event": "node scripts/test-hub-event.mjs"
       }
 }

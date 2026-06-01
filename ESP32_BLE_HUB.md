@@ -134,6 +134,82 @@ Use `nowEpochSeconds()` in `logEvent()` and `updateRoom()` instead of `millis() 
 | Symptom | Fix |
 |---------|-----|
 | HTTP 403 | Publish open `rooms` rules (demo) |
-| PATCH 404 | Run app once to seed `rooms/room_*` or create docs manually |
+| PATCH 404 | Run `npm run seed:hub` or create `rooms/room_*` manually |
+| **No `events` subcollection at all** | ESP32 never successfully POSTed — see below |
 | Events in Console but not in app | Open James’s dashboard (hub sync runs there); check `hubConfig/default.patientId` |
 | Wrong times | Add NTP on ESP32 (see above) |
+
+### Serial shows ENTRY/EXIT but nothing in Firestore
+
+The hub was logging BLE in the scan callback but **HTTP to Firestore must run in `loop()`** on ESP32. Updated firmware **queues** the event and uploads on the next loop pass.
+
+After re-flash, you must see:
+
+```text
+[BLE] Queued room_2 ENTRY — uploading in main loop...
+[FIREBASE] logEvent HTTP 200
+[FIREBASE] *** SAVED *** Check: rooms/room_2/events
+```
+
+If you see `*** FAILED — NOT SAVED TO FIRESTORE ***` instead, read the HTTP code (403 = rules, -1 = WiFi/HTTPS).
+
+### Terminal works, Arduino does not
+
+If `npm run test:hub-event` creates documents but the board does not:
+
+1. Flash **`firmware/esp32_hub/esp32_hub.ino`** (fixed Firestore JSON + HTTPS + serial debug).
+2. Open Serial Monitor **115200** — on boot you should see `[TEST]` and **`logEvent HTTP 200`** when `TEST_FIRESTORE_ON_BOOT` is `true`.
+3. If boot test is **200** but BLE never adds events → BLE beacon format is wrong (see packet table below).
+4. If boot test **fails** (403/400/connection error) → compare serial JSON to [test-hub-event.mjs](./scripts/test-hub-event.mjs).
+
+**Common bugs in the original sketch:**
+
+| Issue | Fix |
+|-------|-----|
+| `fields["type"]["stringValue"] = x` in ArduinoJson | Use `createNestedObject("type")` then `["stringValue"]` |
+| No `WiFiClientSecure` + `setInsecure()` | Required for `https://` on many ESP32 cores |
+| HTTP 400 not obvious | Log `http.getString()` on non-2xx (included in reference sketch) |
+| Never `[BLE] Received` | Door tag must advertise 3-byte manufacturer data |
+
+### Events not appearing (ESP32-side)
+
+Firebase and rules are OK if a manual test works:
+
+```bash
+npm run test:hub-event
+```
+
+Then refresh **rooms → room_1 → events**. You should see at least one document. If that appears but the ESP32 never adds more, the problem is **only on the device**, not Firestore.
+
+**Serial Monitor (115200) — what to look for:**
+
+| You see | Meaning |
+|---------|---------|
+| Nothing after boot except `[BOOT]` | BLE tags not advertising or wrong manufacturer data format |
+| `[BLE] Received: RoomID=1 …` but no `[FIREBASE]` | WiFi dropped or `logEvent` crashed |
+| `[FIREBASE] Event log failed` or HTTP **403** | Rules not published on **test-f80e2**, or wrong project ID in sketch |
+| HTTP **404** on PATCH | Wrong `room_` id or parent doc missing |
+| HTTP **200** on log | Event was written — refresh Console under **events** subcollection |
+
+**BLE packet the hub expects** (first 3 bytes of manufacturer data):
+
+- Byte 0: `roomId` 1–7  
+- Byte 1: `direction` 0 = EXIT, 1 = ENTRY  
+- Byte 2: `0x00`  
+
+If your door beacon doesn’t send that, the hub will ignore it and **no events** will be created.
+
+**ArduinoJson body** must look exactly like this (nested `stringValue` / `integerValue`):
+
+```json
+{
+  "fields": {
+    "type": { "stringValue": "ENTRY" },
+    "roomId": { "integerValue": "1" },
+    "roomName": { "stringValue": "Bathroom" },
+    "timestamp": { "integerValue": "1710000000" }
+  }
+}
+```
+
+If `serializeJson` prints a flat structure, Firestore rejects the POST (check serial for HTTP **400**).

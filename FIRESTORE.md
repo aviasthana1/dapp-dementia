@@ -27,7 +27,7 @@ CareConnect uses these Firestore collections. They are created automatically whe
 
 1. Open Firebase Console → your project → **Firestore Database** → **Rules**.
 2. Replace with the contents of **firestore.rules** in this repo, then **Publish**.
-3. Rules in that file allow read/write for `caregivers`, `patients`, `reminders`, `linkingCodes`, `rooms`, `hubConfig` (development only).
+3. Rules in that file allow **unauthenticated** read/write on all paths (`if true`) for demo + ESP32. **Publish** in the Console — editing the file locally does nothing until you publish.
 
 ## ESP32 BLE hub
 
