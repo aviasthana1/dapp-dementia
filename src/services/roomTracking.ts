@@ -8,11 +8,13 @@ import {
   getDoc,
   getDocs,
   setDoc,
+  serverTimestamp,
   writeBatch,
   query,
   orderBy,
   limit,
   onSnapshot,
+  type Timestamp,
   type Unsubscribe,
 } from "firebase/firestore";
 import { db } from "./firebase";
@@ -64,13 +66,23 @@ function parseNumber(value: unknown): number {
   return 0;
 }
 
-/** ESP32 may send seconds since boot; use wall clock when value is not a real epoch. */
-export function normalizeHubTimestamp(raw: unknown): number {
+/** Firestore Timestamp (from Cloud Function serverTimestamp) or hub epoch seconds/ms. */
+export function parseHubTimeMs(raw: unknown): number {
+  if (raw && typeof raw === "object" && "toMillis" in raw) {
+    const ms = (raw as Timestamp).toMillis();
+    if (Number.isFinite(ms)) return ms;
+  }
   const n = parseNumber(raw);
-  if (n <= 0) return Date.now();
-  if (n < 1_000_000_000) return Date.now();
+  if (n <= 0) return 0;
+  if (n < 1_000_000_000) return 0;
   if (n < 1_000_000_000_000) return n * 1000;
   return n;
+}
+
+/** @deprecated Prefer serverTimestamp on write; kept for callers reading hub fields. */
+export function normalizeHubTimestamp(raw: unknown): number {
+  const ms = parseHubTimeMs(raw);
+  return ms > 0 ? ms : Date.now();
 }
 
 /** Create `rooms/room_1` … `room_7` so ESP32 PATCH succeeds. */
@@ -120,8 +132,8 @@ export async function getRoomStates(): Promise<RoomState[]> {
         roomId: parseNumber(data.roomId),
         name: typeof data.name === "string" ? data.name : d.id,
         occupancy: parseNumber(data.occupancy),
-        lastEntry: parseNumber(data.lastEntry),
-        lastExit: parseNumber(data.lastExit),
+        lastEntry: parseHubTimeMs(data.lastEntry),
+        lastExit: parseHubTimeMs(data.lastExit),
         lastVisitDuration: parseNumber(data.lastVisitDuration),
       };
     })
@@ -143,8 +155,8 @@ export function subscribeRoomStates(
             roomId: parseNumber(data.roomId),
             name: typeof data.name === "string" ? data.name : d.id,
             occupancy: parseNumber(data.occupancy),
-            lastEntry: parseNumber(data.lastEntry),
-            lastExit: parseNumber(data.lastExit),
+            lastEntry: parseHubTimeMs(data.lastEntry),
+            lastExit: parseHubTimeMs(data.lastExit),
             lastVisitDuration: parseNumber(data.lastVisitDuration),
           };
         })
@@ -175,7 +187,7 @@ async function mirrorEntryToPatientLocation(
 
   await setDoc(locRef, {
     room,
-    time: normalizeHubTimestamp(data.timestamp),
+    time: serverTimestamp(),
     source: "esp32",
   });
 }

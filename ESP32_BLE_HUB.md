@@ -99,27 +99,23 @@ That is an **unauthenticated** client. Firestore applies security rules as `requ
 
 The API key identifies the Firebase project; it is **not** a secret bypass for rules. Rules still apply.
 
-## Recommended firmware fix (timestamps)
+## Timestamps (no ESP32 changes needed)
 
-Your sketch uses `millis() / 1000` (uptime seconds), not wall clock. The web app treats small values as invalid and uses `Date.now()` when mirroring.
+The hub may send wrong `timestamp` / `timeLocal` values. **Server time** is applied in two places:
 
-For accurate history, use NTP time on the ESP32:
+1. **Cloud Function** `stampHubRoomEvent` — on each new `rooms/room_N/events/*` doc, sets `timestamp` and `lastEntry` / `lastExit` with `FieldValue.serverTimestamp()`. Deploy once:
 
-```cpp
-#include <time.h>
+   ```bash
+   cd functions && npm install && cd ..
+   firebase login
+   firebase deploy --only functions:stampHubRoomEvent
+   ```
 
-void setupTime() {
-  configTime(0, 0, "pool.ntp.org");
-  struct tm ti;
-  if (!getLocalTime(&ti)) return;
-}
+   Requires the Blaze plan (Firebase free tier + billing enabled for Functions).
 
-unsigned long nowEpochSeconds() {
-  return (unsigned long)time(nullptr);
-}
-```
+2. **Web app** — when mirroring ENTRY into `patients/{id}/location`, uses `serverTimestamp()` for `time` (caregiver dashboard).
 
-Use `nowEpochSeconds()` in `logEvent()` and `updateRoom()` instead of `millis() / 1000`.
+Keep flashing the ESP32 sketch you already have; no need to change `.ino` for timestamps.
 
 ## Test flow
 
@@ -137,7 +133,7 @@ Use `nowEpochSeconds()` in `logEvent()` and `updateRoom()` instead of `millis() 
 | PATCH 404 | Run `npm run seed:hub` or create `rooms/room_*` manually |
 | **No `events` subcollection at all** | ESP32 never successfully POSTed — see below |
 | Events in Console but not in app | Open James’s dashboard (hub sync runs there); check `hubConfig/default.patientId` |
-| Wrong times | Add NTP on ESP32 (see above) |
+| Wrong times (`00:00:00`) | Deploy `stampHubRoomEvent` (see above); new events get server time |
 
 ### Serial shows ENTRY/EXIT but nothing in Firestore
 

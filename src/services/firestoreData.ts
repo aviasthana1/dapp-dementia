@@ -297,9 +297,8 @@ export async function getLocationHistoryForPatient(patientId: string): Promise<P
         time = rawTime;
       } else if (typeof rawTime === "string" && rawTime.trim()) {
         time = Number(rawTime);
-      } else if (rawTime && typeof (rawTime as any).toMillis === "function") {
-        // Firestore Timestamp
-        time = (rawTime as any).toMillis();
+      } else if (rawTime && typeof (rawTime as { toMillis?: () => number }).toMillis === "function") {
+        time = (rawTime as { toMillis: () => number }).toMillis();
       }
 
       return { id: d.id, room, time };

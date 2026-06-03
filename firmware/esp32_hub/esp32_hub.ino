@@ -17,7 +17,16 @@
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
 #include <time.h>
+#include <sys/time.h>
 #include "secrets.h"
+
+// Wall-clock for Firestore (seconds since 1970). Override in secrets.h for local timeLocal strings.
+#ifndef TIMEZONE_OFFSET_SEC
+#define TIMEZONE_OFFSET_SEC 0
+#endif
+#ifndef TIMEZONE_DST_SEC
+#define TIMEZONE_DST_SEC 0
+#endif
 
 #ifndef FIREBASE_PROJECT_ID
 #error "Copy secrets.h.example to secrets.h and set FIREBASE_PROJECT_ID"
@@ -45,6 +54,8 @@ unsigned long lastWifiCheck = 0;
 unsigned long lastBleByRoom[8] = {0};  // debounce per room, not global
 const unsigned long BLE_DEBOUNCE_MS = 2000;
 bool timeSynced = false;
+unsigned long lastTimeSyncAttempt = 0;
+const unsigned long TIME_RESYNC_MS = 300000;  // re-try NTP/HTTP every 5 min if clock was wrong
 
 // Firestore HTTP must run in loop(), NOT inside BLE callback (ESP32 will fail silently)
 struct {
@@ -55,28 +66,101 @@ struct {
 
 WiFiClientSecure secureClient;
 
-/** Sync wall-clock time over NTP (for real Firestore timestamps). */
-void syncNtpTime() {
-  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-  struct tm ti;
-  for (int i = 0; i < 25; i++) {
-    if (getLocalTime(&ti, 500)) {
-      timeSynced = true;
-      char buf[32];
-      strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &ti);
-      Serial.printf("[TIME] NTP synced: %s (epoch %lu)\n", buf, (unsigned long)time(nullptr));
-      return;
-    }
-    delay(200);
-  }
-  Serial.println("[TIME] NTP sync failed — timestamps use device uptime until sync works");
+/** True when system clock is a plausible Unix epoch (May 2024+). */
+bool hasWallClock() {
+  time_t t = time(nullptr);
+  return t > 1700000000L;
 }
 
-/** Unix seconds — real time after NTP, else uptime fallback. */
+void logClockStatus(const char* label) {
+  struct tm ti;
+  if (getLocalTime(&ti)) {
+    char buf[32];
+    strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &ti);
+    Serial.printf("[TIME] %s %s (epoch %lu)%s\n", label, buf, (unsigned long)time(nullptr),
+                  timeSynced ? "" : " [not verified]");
+  } else {
+    Serial.printf("[TIME] %s epoch %lu (clock not set)\n", label, (unsigned long)time(nullptr));
+  }
+}
+
+/** HTTPS fallback when UDP NTP is blocked (campus WiFi often allows this). */
+bool syncTimeFromHttp() {
+  if (WiFi.status() != WL_CONNECTED) return false;
+
+  Serial.println("[TIME] Trying HTTPS time (worldtimeapi.org)...");
+  HTTPClient http;
+  secureClient.setInsecure();
+
+  if (!http.begin(secureClient, "https://worldtimeapi.org/api/ip")) {
+    Serial.println("[TIME] HTTPS time — http.begin failed");
+    return false;
+  }
+  http.setTimeout(15000);
+  int code = http.GET();
+  String payload = http.getString();
+  http.end();
+
+  if (code != 200 || payload.length() < 20) {
+    Serial.printf("[TIME] HTTPS time failed HTTP %d\n", code);
+    return false;
+  }
+
+  StaticJsonDocument<384> doc;
+  if (deserializeJson(doc, payload)) {
+    Serial.println("[TIME] HTTPS time — JSON parse failed");
+    return false;
+  }
+
+  long unixtime = doc["unixtime"] | 0L;
+  if (unixtime < 1700000000L) {
+    Serial.println("[TIME] HTTPS time — invalid unixtime in response");
+    return false;
+  }
+
+  struct timeval tv = { .tv_sec = unixtime, .tv_usec = 0 };
+  settimeofday(&tv, nullptr);
+  timeSynced = true;
+  logClockStatus("HTTPS synced");
+  return true;
+}
+
+/** Sync wall-clock over NTP, then HTTPS if UDP is blocked. */
+void syncNtpTime() {
+  configTime(TIMEZONE_OFFSET_SEC, TIMEZONE_DST_SEC,
+             "pool.ntp.org", "time.google.com", "time.nist.gov");
+
+  struct tm ti;
+  for (int i = 0; i < 40; i++) {
+    if (getLocalTime(&ti, 1000)) {
+      if (hasWallClock()) {
+        timeSynced = true;
+        logClockStatus("NTP synced");
+        return;
+      }
+    }
+    delay(250);
+  }
+  Serial.println("[TIME] NTP failed (UDP 123 may be blocked) — trying HTTPS...");
+  syncTimeFromHttp();
+}
+
+/** Ensure real timestamps before writing to Firestore. */
+bool ensureWallClock() {
+  if (hasWallClock()) {
+    timeSynced = true;
+    return true;
+  }
+  syncNtpTime();
+  if (hasWallClock()) return true;
+  return syncTimeFromHttp();
+}
+
+/** Unix seconds for Firestore — never use uptime (shows as 1970 / 00:00:00). */
 unsigned long nowEpochSec() {
   time_t t = time(nullptr);
   if (t > 1700000000L) return (unsigned long)t;
-  return millis() / 1000;
+  return 0;
 }
 
 /** Human-readable timestamp for Serial Monitor. */
@@ -87,7 +171,7 @@ void logTimestamp(const char* label) {
     char buf[32];
     strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &ti);
     Serial.printf("[TIME] %s %s (epoch %lu)%s\n", label, buf, sec,
-                  timeSynced ? "" : " [uptime fallback]");
+                  timeSynced ? "" : " [clock not verified]");
   } else {
     Serial.printf("[TIME] %s epoch %lu (clock not set)\n", label, sec);
   }
@@ -135,6 +219,7 @@ void writeFirestoreFields(JsonDocument& doc, const char* type, uint8_t roomId,
 
 /** Format current time as "YYYY-MM-DD HH:MM:SS" for logs + Firestore. */
 String formatNowLocal() {
+  if (!hasWallClock()) return String("clock-not-set");
   struct tm ti;
   if (getLocalTime(&ti)) {
     char buf[32];
@@ -217,8 +302,17 @@ bool logEvent(uint8_t roomId, const char* roomName, const char* eventType) {
     return false;
   }
 
+  if (!ensureWallClock()) {
+    Serial.println("[FIREBASE] logEvent skipped — wall clock not set (NTP + HTTPS failed)");
+    return false;
+  }
+
   unsigned long timestampSec = nowEpochSec();
   String timeLocal = formatNowLocal();
+  if (timestampSec == 0) {
+    Serial.println("[FIREBASE] logEvent skipped — invalid timestamp");
+    return false;
+  }
 
   StaticJsonDocument<512> doc;
   writeFirestoreFields(doc, eventType, roomId, roomName, timestampSec, timeLocal.c_str());
@@ -231,7 +325,8 @@ bool logEvent(uint8_t roomId, const char* roomName, const char* eventType) {
            "https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents/rooms/room_%u/events?key=%s",
            FIREBASE_PROJECT_ID, roomId, FIREBASE_API_KEY);
 
-  Serial.printf("[FIREBASE] POST room_%u/events ts=%lu\n", roomId, timestampSec);
+  Serial.printf("[FIREBASE] POST room_%u/events ts=%lu timeLocal=%s\n",
+                roomId, timestampSec, timeLocal.c_str());
   Serial.println(body);
   Serial.flush();
   return postJson(url, body, "logEvent");
@@ -241,8 +336,10 @@ bool updateRoom(uint8_t roomId, const char* eventType) {
   Serial.println("[FIREBASE] ---- updateRoom START ----");
   Serial.flush();
   if (WiFi.status() != WL_CONNECTED) return false;
+  if (!ensureWallClock()) return false;
 
   unsigned long timestampSec = nowEpochSec();
+  if (timestampSec == 0) return false;
   const char* fieldMask = (strcmp(eventType, "ENTRY") == 0) ? "lastEntry" : "lastExit";
 
   StaticJsonDocument<256> doc;
@@ -276,6 +373,11 @@ void processPendingEvent() {
 
   Serial.println("[FIREBASE] ---- processPendingEvent ----");
   Serial.flush();
+
+  if (!ensureWallClock()) {
+    Serial.println("[FIREBASE] *** WAITING — wall clock not set; event kept for retry ***");
+    return;
+  }
 
   pendingEvent.ready = false;
   uint8_t roomId = pendingEvent.roomId;
@@ -467,6 +569,10 @@ void loop() {
       connectWifi();
     } else {
       setLED(true);
+      if (!timeSynced && now - lastTimeSyncAttempt > TIME_RESYNC_MS) {
+        lastTimeSyncAttempt = now;
+        ensureWallClock();
+      }
     }
   }
 
