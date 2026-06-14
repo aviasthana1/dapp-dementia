@@ -90,13 +90,13 @@ export function normalizeHubTimestamp(raw: unknown): number {
 /** Format hub/location epoch ms for patient & caregiver UI. */
 export function formatHubActivityTime(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return "Just now";
-  return new Date(ms).toLocaleString("en-US", {
+  return new Date(ms).toLocaleString(undefined, {
     weekday: "short",
     month: "short",
     day: "numeric",
-    hour: "numeric",
+    hour: "2-digit",
     minute: "2-digit",
-    hour12: true,
+    hour12: false,
   });
 }
 
@@ -260,13 +260,13 @@ export function subscribeRoomStates(
 
 /** Human-readable local time string (client-side, no Cloud Function). */
 function formatTimeLocalClient(date = new Date()): string {
-  return date.toLocaleString("en-US", {
+  return date.toLocaleString(undefined, {
     weekday: "short",
     month: "short",
     day: "numeric",
-    hour: "numeric",
+    hour: "2-digit",
     minute: "2-digit",
-    hour12: true,
+    hour12: false,
   });
 }
 

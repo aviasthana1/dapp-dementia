@@ -9,6 +9,7 @@
 
 import { useEffect, useRef } from 'react';
 import { subscribeLocationHistoryForPatient, createReminder } from './firestoreData';
+import { formatClockTime } from './timeFormat';
 
 // ── Config ────────────────────────────────────────────────────────────────────
 // How long (in milliseconds) before we trigger a reminder for each room.
@@ -22,13 +23,9 @@ const ROOM_THRESHOLDS: Record<string, number> = {
 // How often we check (every 10 seconds)
 const CHECK_INTERVAL_MS = 10 * 1000;
 
-// ── Helper: convert epoch to a readable time string like "2:30 PM" ────────────
+// ── Helper: convert epoch to 24-hour time string (HH:MM) ─────────────────────
 function epochToTimeString(epochMs: number): string {
-  return new Date(epochMs).toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  });
+  return formatClockTime(new Date(epochMs));
 }
 
 // ── Helper: normalise time to milliseconds ────────────────────────────────────

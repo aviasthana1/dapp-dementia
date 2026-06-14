@@ -2147,6 +2147,7 @@ html {
 html {
   font-family: var(--font-primary);
   overflow-x: hidden;
+  height: 100%;
 }
 
 body {
@@ -2154,18 +2155,26 @@ body {
   font-weight: 400;
   line-height: 1.5;
   overflow-x: hidden;
+  overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  height: 100%;
 }
 
 @supports (height: 100dvh) {
   html,
   body {
     min-height: 100dvh;
+    height: auto;
   }
+}
+
+#root {
+  min-height: 100%;
 }
 
 .app-page {
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--primaryBg);
   color: var(--textMain);
 }
@@ -2448,6 +2457,8 @@ body {
   min-height: 100dvh;
   padding: max(2rem, env(safe-area-inset-top)) 2rem max(2rem, env(safe-area-inset-bottom));
   background: #f8f9fa;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .home-screen-inner {
@@ -2528,13 +2539,20 @@ body {
 .patient-screen {
   display: flex;
   flex-direction: column;
+  height: 100dvh;
   min-height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
   background: #e8f0fa;
   color: #1a2b42;
 }
 
 .patient-screen--link {
   justify-content: center;
+  height: auto;
+  min-height: 100dvh;
+  max-height: none;
+  overflow-y: auto;
 }
 
 .patient-link-shell {
@@ -2549,6 +2567,7 @@ body {
 }
 
 .patient-header {
+  flex-shrink: 0;
   padding: max(1rem, env(safe-area-inset-top)) 1.25rem 1.25rem;
   background: #d4e4f7;
   border-bottom: 1px solid #b8cfe8;
@@ -2585,11 +2604,11 @@ body {
 .patient-settings-btn {
   display: inline-flex;
   align-items: center;
-  gap: 0.375rem;
+  justify-content: center;
   flex-shrink: 0;
-  padding: 0.5rem 0.75rem;
-  font-size: 0.875rem;
-  font-weight: 600;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
   color: #1a2b42;
   background: #fff;
   border: 1px solid #c5d9ef;
@@ -2629,9 +2648,12 @@ body {
 }
 
 .patient-main {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 1.25rem 1.25rem 1.5rem;
-  overflow: auto;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
 }
 
 .patient-section-title {
@@ -2644,11 +2666,23 @@ body {
 }
 
 .patient-task-card {
-  margin-bottom: 1.75rem;
   padding: 1.25rem 1.125rem 1.125rem;
   background: #fff;
   border: 2px solid #b8d4f0;
   border-radius: 1rem;
+}
+
+.patient-task-list {
+  list-style: none;
+  margin: 0 0 1.75rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.patient-task-list .patient-task-card {
+  margin-bottom: 0;
 }
 
 .patient-task-card--empty {
@@ -2813,6 +2847,7 @@ body {
 }
 
 .patient-footer {
+  flex-shrink: 0;
   padding: 1rem 1.25rem max(1rem, env(safe-area-inset-bottom));
   border-top: 1px solid #b8cfe8;
   background: #e8f0fa;

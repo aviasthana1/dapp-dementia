@@ -4,19 +4,21 @@ import {
   subscribeRemindersForPatient,
   updateReminderDone,
   createReminder,
+  sortRemindersByTime,
 } from '../src/services/firestoreData';
 import type { Reminder } from '../src/services/firestoreData';
 import { usePatientPreferences } from '../src/hooks/usePatientPreferences';
 import { shouldPlayReminderSound } from '../src/services/patientPreferences';
 import { playReminderSound } from '../src/services/reminderSound';
-import {
-  subscribeRecentHubEvents,
-  startHubLocationSync,
-  type HubActivity,
-} from '../src/services/roomTracking';
 import { CurrentTaskCardSkeleton } from './Skeleton';
 import { LogoMark } from './Logo';
 import { Button, ErrorBanner, Field, Input, PageTitle } from './ui';
+import {
+  formatClockTime,
+  formatTimeFromPicker,
+  formatReminderTime,
+  defaultTimePickerValue,
+} from '../src/services/timeFormat';
 
 const CAREGIVER_PHONE_KEY = 'caregiverPhone';
 const DEFAULT_CAREGIVER_PHONE = '+15551234567';
@@ -28,34 +30,12 @@ type PatientHomeScreenProps = {
   onLinkAccount: () => void;
 };
 
-function formatTime(date: Date): string {
-  return date.toLocaleTimeString('en-US', {
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  });
-}
-
 function formatDate(date: Date): string {
   return date.toLocaleDateString('en-US', {
     weekday: 'long',
     month: 'long',
     day: 'numeric',
   });
-}
-
-function defaultTimePickerValue(): string {
-  const d = new Date();
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-}
-
-function formatTimeFromPicker(hhmm: string): string {
-  if (!hhmm) return 'Soon';
-  const [hours, minutes] = hhmm.split(':').map((x) => parseInt(x, 10));
-  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return 'Soon';
-  const d = new Date();
-  d.setHours(hours, minutes, 0, 0);
-  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
 }
 
 export function PatientHomeScreen({
@@ -73,9 +53,10 @@ export function PatientHomeScreen({
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [addTitle, setAddTitle] = useState('');
-  const [addTimePicker, setAddTimePicker] = useState(defaultTimePickerValue);
+  const [addTimePicker, setAddTimePicker] = useState(() => defaultTimePickerValue());
   const [adding, setAdding] = useState(false);
-  const [hubActivity, setHubActivity] = useState<HubActivity[]>([]);
+  const [markingId, setMarkingId] = useState<string | null>(null);
+  const completedIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const t = setInterval(() => setNow(new Date()), 1000);
@@ -87,15 +68,20 @@ export function PatientHomeScreen({
       setReminders([]);
       setLoading(false);
       setError(null);
+      completedIdsRef.current.clear();
       return;
     }
+
+    completedIdsRef.current.clear();
 
     setLoading(true);
     setError(null);
     const unsubscribe = subscribeRemindersForPatient(
       patientId,
       (list) => {
-        setReminders(list.filter((r) => !r.done));
+        setReminders(
+          list.filter((r) => r.done !== true && !completedIdsRef.current.has(r.id))
+        );
         setLoading(false);
       },
       (err) => {
@@ -104,25 +90,6 @@ export function PatientHomeScreen({
       }
     );
     return () => unsubscribe();
-  }, [patientId]);
-
-  useEffect(() => {
-    if (!patientId) {
-      setHubActivity([]);
-      return;
-    }
-
-    const unsubHub = subscribeRecentHubEvents(setHubActivity, (err) => {
-      console.warn('Hub activity:', err);
-    });
-    const unsubMirror = startHubLocationSync(patientId, (err) => {
-      console.warn('Hub mirror:', err);
-    });
-
-    return () => {
-      unsubHub();
-      unsubMirror();
-    };
   }, [patientId]);
 
   const currentTask = reminders[0] ?? null;
@@ -136,13 +103,23 @@ export function PatientHomeScreen({
     }
   }, [currentTask?.id, loading, prefs]);
 
-  const handleMarkDone = async () => {
-    if (!currentTask) return;
+  const handleMarkDone = async (reminderId: string) => {
+    if (markingId === reminderId) return;
+    const task = reminders.find((r) => r.id === reminderId);
+    if (!task) return;
+
+    setMarkingId(reminderId);
+    setError(null);
+    completedIdsRef.current.add(reminderId);
+    setReminders((prev) => prev.filter((r) => r.id !== reminderId));
     try {
-      await updateReminderDone(currentTask.id);
-      setReminders((prev) => prev.filter((r) => r.id !== currentTask.id));
+      await updateReminderDone(reminderId);
     } catch {
+      completedIdsRef.current.delete(reminderId);
+      setReminders((prev) => sortRemindersByTime([...prev, task]));
       setError('Could not mark reminder as done. Try again.');
+    } finally {
+      setMarkingId(null);
     }
   };
 
@@ -200,14 +177,18 @@ export function PatientHomeScreen({
             <LogoMark size="sm" className="patient-header-logo" />
             <p className="patient-greeting">Hello, {displayName}!</p>
           </div>
-          <button type="button" className="patient-settings-btn" onClick={onSettings}>
+          <button
+            type="button"
+            className="patient-settings-btn"
+            onClick={onSettings}
+            aria-label="Settings"
+          >
             <Settings className="patient-settings-icon" aria-hidden />
-            Settings
           </button>
         </div>
 
         <div className="patient-clock">
-          <p className="patient-time">{formatTime(now)}</p>
+          <p className="patient-time">{formatClockTime(now)}</p>
           <p className="patient-date">{formatDate(now)}</p>
         </div>
       </header>
@@ -219,51 +200,44 @@ export function PatientHomeScreen({
 
         {loading ? (
           <CurrentTaskCardSkeleton />
-        ) : currentTask ? (
-          <article className="patient-task-card">
-            <p className="patient-task-badge">
-              <Star className="patient-task-badge-icon" aria-hidden fill="currentColor" />
-              Up next
-            </p>
-            {currentTask.photoUrl && (
-              <img src={currentTask.photoUrl} alt="" className="task-photo" />
-            )}
-            <p className="patient-task-name">{currentTask.title}</p>
-            <p className="patient-task-schedule">
-              <Clock className="patient-task-clock-icon" aria-hidden />
-              {currentTask.time}
-            </p>
-            <button type="button" className="patient-btn patient-btn--done" onClick={handleMarkDone}>
-              <Check className="patient-btn-icon" aria-hidden strokeWidth={3} />
-              Mark as done
-            </button>
-          </article>
-        ) : (
+        ) : reminders.length === 0 ? (
           <article className="patient-task-card patient-task-card--empty">
             <p className="patient-task-name">All caught up</p>
             <p className="patient-task-schedule">No reminders right now.</p>
           </article>
-        )}
-
-        {hubActivity.length > 0 && (
-          <>
-            <h2 className="patient-section-title">Room activity</h2>
-            <ul className="patient-activity-list" aria-label="Recent room entries and exits">
-              {hubActivity.map((event) => (
-                <li key={`${event.roomId}_${event.id}`} className="patient-activity-item">
-                  <div className="patient-activity-main">
-                    <span className="patient-activity-room">{event.roomName}</span>
-                    <span className="patient-activity-type">
-                      {event.type === 'ENTRY' ? 'Entered' : event.type === 'EXIT' ? 'Left' : event.type}
-                    </span>
-                  </div>
-                  {event.timeLabel && (
-                    <span className="patient-activity-time">{event.timeLabel}</span>
+        ) : (
+          <ul className="patient-task-list" aria-label="Today's reminders">
+            {reminders.map((task, index) => (
+              <li key={task.id}>
+                <article className="patient-task-card">
+                  {index === 0 && (
+                    <p className="patient-task-badge">
+                      <Star className="patient-task-badge-icon" aria-hidden fill="currentColor" />
+                      Up next
+                    </p>
                   )}
-                </li>
-              ))}
-            </ul>
-          </>
+                  {task.photoUrl && (
+                    <img src={task.photoUrl} alt="" className="task-photo" />
+                  )}
+                  <p className="patient-task-name">{task.title}</p>
+                  <p className="patient-task-schedule">
+                    <Clock className="patient-task-clock-icon" aria-hidden />
+                    {formatReminderTime(task.time)}
+                  </p>
+                  <button
+                    type="button"
+                    className="patient-btn patient-btn--done"
+                    onClick={() => handleMarkDone(task.id)}
+                    disabled={markingId === task.id}
+                    aria-label={`Mark ${task.title} as done`}
+                  >
+                    <Check className="patient-btn-icon" aria-hidden strokeWidth={3} />
+                    {markingId === task.id ? 'Saving…' : 'Mark as done'}
+                  </button>
+                </article>
+              </li>
+            ))}
+          </ul>
         )}
 
         <h2 className="patient-section-title">Add your own reminder</h2>
@@ -280,7 +254,7 @@ export function PatientHomeScreen({
                   autoComplete="off"
                 />
               </Field>
-              <Field label="What time?">
+              <Field label="What time? (24-hour)">
                 <Input
                   type="time"
                   value={addTimePicker}

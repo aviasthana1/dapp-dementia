@@ -44,6 +44,31 @@ export type Reminder = {
 };
 export type LinkingCode = { code: string; patientId: string; patientName: string };
 
+/** Sort reminders by time of day (24h HH:MM or legacy AM/PM). */
+export function sortRemindersByTime(reminders: Reminder[], refDate = new Date()): Reminder[] {
+  const day = refDate.toDateString();
+
+  const toMinutes = (time: string): number => {
+    const trimmed = time.trim();
+    if (!trimmed) return Number.MAX_SAFE_INTEGER;
+
+    const parsed = Date.parse(`${day} ${trimmed}`);
+    if (Number.isFinite(parsed)) {
+      const d = new Date(parsed);
+      return d.getHours() * 60 + d.getMinutes();
+    }
+
+    const match = trimmed.match(/^(\d{1,2}):(\d{2})$/);
+    if (match) {
+      return parseInt(match[1], 10) * 60 + parseInt(match[2], 10);
+    }
+
+    return Number.MAX_SAFE_INTEGER;
+  };
+
+  return [...reminders].sort((a, b) => toMinutes(a.time) - toMinutes(b.time));
+}
+
 const SEED_CAREGIVERS: Caregiver[] = [
   { id: "c1", email: "maria@careconnect.example", name: "Maria" },
   { id: "c2", email: "john@careconnect.example", name: "John" },
@@ -56,15 +81,15 @@ const SEED_PATIENTS: Patient[] = [
   { id: "p4", name: "Margaret", caregiverId: "c3" },
 ];
 const SEED_REMINDERS: Reminder[] = [
-  { id: "r1", patientId: "p1", title: "Take morning medication", time: "8:00 AM", done: false },
-  { id: "r2", patientId: "p1", title: "Drink water", time: "10:00 AM", done: false },
-  { id: "r3", patientId: "p1", title: "Lunch", time: "12:30 PM", done: false },
-  { id: "r4", patientId: "p1", title: "Afternoon walk", time: "3:00 PM", done: false },
-  { id: "r5", patientId: "p2", title: "Take morning medication", time: "8:30 AM", done: false },
-  { id: "r6", patientId: "p2", title: "Call family", time: "2:00 PM", done: false },
-  { id: "r7", patientId: "p3", title: "Take morning medication", time: "9:00 AM", done: false },
-  { id: "r8", patientId: "p4", title: "Take morning medication", time: "8:00 AM", done: false },
-  { id: "r9", patientId: "p4", title: "Rest", time: "1:00 PM", done: false },
+  { id: "r1", patientId: "p1", title: "Take morning medication", time: "08:00", done: false },
+  { id: "r2", patientId: "p1", title: "Drink water", time: "10:00", done: false },
+  { id: "r3", patientId: "p1", title: "Lunch", time: "12:30", done: false },
+  { id: "r4", patientId: "p1", title: "Afternoon walk", time: "15:00", done: false },
+  { id: "r5", patientId: "p2", title: "Take morning medication", time: "08:30", done: false },
+  { id: "r6", patientId: "p2", title: "Call family", time: "14:00", done: false },
+  { id: "r7", patientId: "p3", title: "Take morning medication", time: "09:00", done: false },
+  { id: "r8", patientId: "p4", title: "Take morning medication", time: "08:00", done: false },
+  { id: "r9", patientId: "p4", title: "Rest", time: "13:00", done: false },
 ];
 const SEED_LINKING_CODES: LinkingCode[] = [
   { code: "JAMES01", patientId: "p1", patientName: "James" },
@@ -162,7 +187,7 @@ export async function getRemindersForPatient(patientId: string): Promise<Reminde
   );
   const snap = await getDocs(q);
   const list = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Reminder));
-  return list.sort((a, b) => a.time.localeCompare(b.time));
+  return sortRemindersByTime(list);
 }
 
 export async function validateLinkingCode(code: string): Promise<LinkingCode | undefined> {
@@ -198,7 +223,7 @@ export function subscribeRemindersForPatient(
     q,
     (snap) => {
       const list = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Reminder));
-      onUpdate(list.sort((a, b) => a.time.localeCompare(b.time)));
+      onUpdate(sortRemindersByTime(list));
     },
     (err) => onError?.(err)
   );

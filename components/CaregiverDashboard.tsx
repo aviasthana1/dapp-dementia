@@ -1,18 +1,21 @@
 import { useState, useEffect } from 'react';
 import {
-  getRemindersForPatient,
   createReminder,
+  subscribeRemindersForPatient,
+  deleteReminder,
   uploadReminderPhoto,
   setReminderPhotoUrl,
   subscribeLocationHistoryForPatient,
-  deleteReminder,
 } from '../src/services/firestoreData';
 import type { Reminder, PatientLocationEvent } from '../src/services/firestoreData';
 import {
   startHubLocationSync,
+  subscribeRecentHubEvents,
   subscribeRoomStates,
+  type HubActivity,
   type RoomState,
 } from '../src/services/roomTracking';
+import { formatDateTime24, formatReminderTime, formatTimeFromPicker, defaultTimePickerValue } from '../src/services/timeFormat';
 import { Clock, Trash2 } from 'lucide-react';
 import { LocationHistorySkeleton, ReminderListSkeleton } from './Skeleton';
 import {
@@ -48,14 +51,7 @@ function ReminderPhoto({ url, alt, className }: { url: string; alt: string; clas
 function formatLocationTime(epoch: number): string {
   if (!Number.isFinite(epoch)) return 'Unknown time';
   const ms = epoch > 1e12 ? epoch : epoch * 1000;
-  return new Date(ms).toLocaleString('en-US', {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
-  });
+  return formatDateTime24(ms);
 }
 
 export function CaregiverDashboard({
@@ -69,26 +65,32 @@ export function CaregiverDashboard({
   const [error, setError] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
   const [addTitle, setAddTitle] = useState('');
-  const [addTime, setAddTime] = useState('');
+  const [addTimePicker, setAddTimePicker] = useState(defaultTimePickerValue);
   const [addPhoto, setAddPhoto] = useState<File | null>(null);
   const [adding, setAdding] = useState(false);
 
-  const loadReminders = () => {
-    setLoading(true);
-    getRemindersForPatient(patientId)
-      .then(setReminders)
-      .catch((err) => setError(err?.message ?? 'Failed to load'))
-      .finally(() => setLoading(false));
-  };
-
   useEffect(() => {
-    loadReminders();
+    setLoading(true);
+    setError(null);
+    const unsub = subscribeRemindersForPatient(
+      patientId,
+      (list) => {
+        setReminders(list);
+        setLoading(false);
+      },
+      (err) => {
+        setError(err?.message ?? 'Failed to load');
+        setLoading(false);
+      }
+    );
+    return () => unsub();
   }, [patientId]);
 
   const [locationHistory, setLocationHistory] = useState<PatientLocationEvent[]>([]);
   const [locationLoading, setLocationLoading] = useState(true);
   const [locationError, setLocationError] = useState<string | null>(null);
   const [roomStates, setRoomStates] = useState<RoomState[]>([]);
+  const [hubActivity, setHubActivity] = useState<HubActivity[]>([]);
 
   useEffect(() => {
     setLocationLoading(true);
@@ -111,11 +113,15 @@ export function CaregiverDashboard({
     });
 
     const unsubRooms = subscribeRoomStates(setRoomStates);
+    const unsubActivity = subscribeRecentHubEvents(setHubActivity, (err) => {
+      setLocationError(err.message ?? 'Failed to load room activity');
+    });
 
     return () => {
       unsubLocation();
       unsubHub();
       unsubRooms();
+      unsubActivity();
     };
   }, [patientId]);
 
@@ -124,7 +130,6 @@ export function CaregiverDashboard({
     setError(null);
     try {
       await deleteReminder(reminderId);
-      loadReminders();
     } catch (err) {
       setError((err as Error)?.message ?? 'Failed to delete reminder');
     }
@@ -132,23 +137,22 @@ export function CaregiverDashboard({
 
   const handleAddReminder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!addTitle.trim() || !addTime.trim()) return;
+    if (!addTitle.trim()) return;
     setAdding(true);
     setError(null);
     try {
       const id = await createReminder(patientId, {
         title: addTitle.trim(),
-        time: addTime.trim(),
+        time: formatTimeFromPicker(addTimePicker),
       });
       if (addPhoto) {
         const photoUrl = await uploadReminderPhoto(patientId, id, addPhoto);
         await setReminderPhotoUrl(id, photoUrl);
       }
       setAddTitle('');
-      setAddTime('');
+      setAddTimePicker(defaultTimePickerValue());
       setAddPhoto(null);
       setShowAddForm(false);
-      loadReminders();
     } catch (err) {
       setError((err as Error)?.message ?? 'Failed to add reminder');
     } finally {
@@ -182,11 +186,11 @@ export function CaregiverDashboard({
                 required
               />
             </Field>
-            <Field label="Time">
+            <Field label="Time (24-hour)">
               <Input
-                value={addTime}
-                onChange={(e) => setAddTime(e.target.value)}
-                placeholder="8:00 AM"
+                type="time"
+                value={addTimePicker}
+                onChange={(e) => setAddTimePicker(e.target.value)}
                 required
               />
             </Field>
@@ -211,7 +215,7 @@ export function CaregiverDashboard({
                 onClick={() => {
                   setShowAddForm(false);
                   setAddTitle('');
-                  setAddTime('');
+                  setAddTimePicker(defaultTimePickerValue());
                   setAddPhoto(null);
                 }}
               >
@@ -240,7 +244,7 @@ export function CaregiverDashboard({
                 <p className="font-medium">{r.title}</p>
                 <p className="text-sm text-muted flex items-center gap-1 mt-0.5">
                   <Clock className="w-3.5 h-3.5" aria-hidden />
-                  {r.time}
+                  {formatReminderTime(r.time)}
                   {r.done && <span className="text-green-700"> · Done</span>}
                 </p>
               </div>
@@ -272,6 +276,27 @@ export function CaregiverDashboard({
             ))}
           </ul>
         </>
+      )}
+
+      <SectionLabel>Room activity</SectionLabel>
+      {hubActivity.length === 0 ? (
+        <p className="text-sm text-muted mb-6">No confirmed room visits yet.</p>
+      ) : (
+        <ul className="stack mb-6" aria-label="Recent room entries and exits">
+          {hubActivity.map((event) => (
+            <li key={`${event.roomId}_${event.id}`} className="card flex justify-between gap-3 items-start">
+              <div>
+                <p className="font-medium">{event.roomName}</p>
+                <p className="text-sm text-muted mt-0.5">
+                  {event.type === 'ENTRY' ? 'Entered' : event.type === 'EXIT' ? 'Left' : event.type}
+                </p>
+              </div>
+              {event.timeLabel && (
+                <p className="text-sm text-muted shrink-0">{formatDateTime24(event.timeMs)}</p>
+              )}
+            </li>
+          ))}
+        </ul>
       )}
 
       <SectionLabel>Location history</SectionLabel>
