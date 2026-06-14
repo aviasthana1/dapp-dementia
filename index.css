@@ -2388,15 +2388,6 @@ body {
   background: #f5f5f5;
 }
 
-.landing {
-  display: flex;
-  flex-direction: column;
-  min-height: 100dvh;
-  max-width: 26rem;
-  margin: 0 auto;
-  padding: max(2rem, env(safe-area-inset-top)) 1.5rem max(1.5rem, env(safe-area-inset-bottom));
-}
-
 .logo-brand {
   display: flex;
   flex-direction: column;
@@ -2419,33 +2410,6 @@ body {
 
 .logo-brand--row .logo-brand-name {
   font-size: 1.125rem;
-}
-
-.landing-header {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding-bottom: 2rem;
-  text-align: center;
-}
-
-.landing-main {
-  padding-bottom: 1.5rem;
-}
-
-.landing-footer {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.landing-hint {
-  margin-top: 0.5rem;
-  font-size: 0.8125rem;
-  text-align: center;
-  color: var(--textMuted);
 }
 
 /* Home screen — mockup layout */

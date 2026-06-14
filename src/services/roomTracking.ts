@@ -81,12 +81,6 @@ export function parseHubTimeMs(raw: unknown): number {
   return n;
 }
 
-/** @deprecated Prefer serverTimestamp on write; kept for callers reading hub fields. */
-export function normalizeHubTimestamp(raw: unknown): number {
-  const ms = parseHubTimeMs(raw);
-  return ms > 0 ? ms : Date.now();
-}
-
 /** Format hub/location epoch ms for patient & caregiver UI. */
 export function formatHubActivityTime(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return "Just now";
