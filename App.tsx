@@ -1,49 +1,99 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import {
+  Linking,
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+
 import { seedInitialDataIfEmpty } from './src/services/firestoreData';
 import { firebaseProjectId } from './src/services/firebase';
+
 import {
   getStoredCaregiverEmail,
-  setStoredCaregiverEmail,
   getStoredLinkedPatient,
+  setStoredCaregiverEmail,
   setStoredLinkedPatient,
 } from './src/services/session';
-import { CaregiverLogin } from './components/CaregiverLogin';
-import { PatientSelectionDashboard } from './components/PatientSelectionDashboard';
-import { CaregiverDashboard } from './components/CaregiverDashboard';
-import { CaregiverSettings } from './components/CaregiverSettings';
-import { PatientHomeScreen } from './components/PatientHomeScreen';
-import { PatientSettings } from './components/PatientSettings';
-import { AccountLinking } from './components/AccountLinking';
-import { LogoBrand } from './components/Logo';
-import { Button } from './components/ui';
 
-type View = 'home' | 'caregiver-login' | 'patient-selection' | 'caregiver-dashboard' | 'caregiver-settings' | 'patient' | 'patient-settings' | 'account-linking';
+import { AccountLinking } from './components/AccountLinking';
+import { Button } from './components/ui';
+import { CaregiverDashboard } from './components/CaregiverDashboard';
+import { CaregiverLogin } from './components/CaregiverLogin';
+import { CaregiverSettings } from './components/CaregiverSettings';
+import { LogoBrand } from './components/Logo';
+import { PatientHomeScreen } from './components/PatientHomeScreen';
+import { PatientSelectionDashboard } from './components/PatientSelectionDashboard';
+import { PatientSettings } from './components/PatientSettings';
+
+type AppView =
+  | 'home'
+  | 'caregiver-login'
+  | 'patient-selection'
+  | 'caregiver-dashboard'
+  | 'caregiver-settings'
+  | 'patient'
+  | 'patient-settings'
+  | 'account-linking';
 
 export default function App() {
   const [firebaseError, setFirebaseError] = useState<string | null>(null);
 
+  const [currentView, setCurrentView] = useState<AppView>('home');
+
+  const [isLoggedIn, setIsLoggedIn] = useState(
+    () => !!getStoredCaregiverEmail()
+  );
+
+  const [currentCaregiver, setCurrentCaregiver] = useState<string | null>(
+    () => getStoredCaregiverEmail()
+  );
+
+  const [selectedPatientId, setSelectedPatientId] = useState<string | null>(
+    null
+  );
+
+  const [selectedPatientName, setSelectedPatientName] = useState<string | null>(
+    null
+  );
+
+  const [linkedPatientId, setLinkedPatientId] = useState<string | null>(
+    () => getStoredLinkedPatient()?.id ?? null
+  );
+
+  const [linkedPatientName, setLinkedPatientName] = useState<string | null>(
+    () => getStoredLinkedPatient()?.name ?? null
+  );
+
+  const [accountLinkReturnView, setAccountLinkReturnView] =
+    useState<AppView>('home');
+
   useEffect(() => {
     seedInitialDataIfEmpty().catch((err) => {
-      const msg = err?.message ?? '';
-      if (msg.includes('permission') || msg.includes('Permission')) {
-        setFirebaseError('Firestore permission denied. Add rules in Firebase Console → Firestore → Rules (see FIRESTORE.md).');
+      const message = err?.message ?? '';
+
+      if (message.includes('permission') || message.includes('Permission')) {
+        setFirebaseError(
+          'Firestore permission denied. Add rules in Firebase Console → Firestore → Rules.'
+        );
       }
+
       console.warn('Firebase seed:', err);
     });
   }, []);
 
-  const [currentView, setCurrentView] = useState<View>('home');
-  const [isLoggedIn, setIsLoggedIn] = useState(() => !!getStoredCaregiverEmail());
-  const [currentCaregiver, setCurrentCaregiver] = useState<string | null>(() => getStoredCaregiverEmail());
-  const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
-  const [selectedPatientName, setSelectedPatientName] = useState<string | null>(null);
-  const [linkedPatientId, setLinkedPatientId] = useState<string | null>(
-    () => getStoredLinkedPatient()?.id ?? null
-  );
-  const [linkedPatientName, setLinkedPatientName] = useState<string | null>(
-    () => getStoredLinkedPatient()?.name ?? null
-  );
-  const [accountLinkReturnView, setAccountLinkReturnView] = useState<View>('home');
+  const handleOpenFirebaseRules = async () => {
+    const url = `https://console.firebase.google.com/project/${firebaseProjectId}/firestore/rules`;
+
+    try {
+      await Linking.openURL(url);
+    } catch {
+      console.warn('Could not open Firebase rules URL');
+    }
+  };
 
   const handleCaregiverLogin = (email: string) => {
     setIsLoggedIn(true);
@@ -87,104 +137,101 @@ export default function App() {
     setStoredLinkedPatient(null);
   };
 
-  return (
-    <div className="min-h-screen app-page">
-      {firebaseError && (
-        <div className="banner-warn flex items-center justify-between gap-3 flex-wrap">
-          <p>{firebaseError}</p>
-          <div className="flex gap-3 text-sm">
-            <a
-              href={`https://console.firebase.google.com/project/${firebaseProjectId}/firestore/rules`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-medium underline"
-            >
-              Open rules
-            </a>
-            <button type="button" onClick={() => setFirebaseError(null)} className="btn-text" style={{ marginBottom: 0 }}>
-              Dismiss
-            </button>
-          </div>
-        </div>
-      )}
+  const renderFirebaseError = () => {
+    if (!firebaseError) return null;
 
-      {currentView === 'home' && (
-        <div className="landing">
-          <header className="landing-header">
-            <LogoBrand size="lg" className="mb-2" />
-            <p className="page-subtitle">Reminders for patients and caregivers</p>
-          </header>
+    return (
+      <View style={styles.warningBanner}>
+        <Text style={styles.warningText}>{firebaseError}</Text>
 
-          <main className="landing-main stack">
-            <Button className="w-full" onClick={() => setCurrentView('patient')}>
-              My reminders
-            </Button>
-          </main>
+        <View style={styles.warningActions}>
+          <Pressable
+            onPress={handleOpenFirebaseRules}
+            style={styles.warningButton}
+          >
+            <Text style={styles.warningButtonText}>Open rules</Text>
+          </Pressable>
 
-          <footer className="landing-footer">
-            <Button
-              variant="secondary"
-              className="w-full"
-              onClick={() => {
-                if (isLoggedIn && currentCaregiver) {
-                  setCurrentView('patient-selection');
-                } else {
-                  setCurrentView('caregiver-login');
-                }
-              }}
-            >
-              Caregiver login
-            </Button>
-            <Button
-              variant="ghost"
-              className="w-full"
-              onClick={() => {
-                setAccountLinkReturnView('home');
-                setCurrentView('account-linking');
-              }}
-            >
-              Link account
-            </Button>
-            <p className="landing-hint">Ask your caregiver for a linking code.</p>
-          </footer>
-        </div>
-      )}
+          <Pressable
+            onPress={() => setFirebaseError(null)}
+            style={styles.warningButton}
+          >
+            <Text style={styles.warningButtonText}>Dismiss</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  };
 
-      {currentView === 'caregiver-login' && (
+  if (currentView === 'caregiver-login') {
+    return (
+      <>
+        {renderFirebaseError()}
+
         <CaregiverLogin
           onLogin={handleCaregiverLogin}
           onBack={() => setCurrentView('home')}
         />
-      )}
+      </>
+    );
+  }
 
-      {currentView === 'patient-selection' && isLoggedIn && (
+  if (currentView === 'patient-selection' && isLoggedIn && currentCaregiver) {
+    return (
+      <>
+        {renderFirebaseError()}
+
         <PatientSelectionDashboard
-          caregiverEmail={currentCaregiver!}
+          caregiverEmail={currentCaregiver}
           onSelectPatient={handlePatientSelect}
           onLogout={handleLogout}
           onSettings={() => setCurrentView('caregiver-settings')}
         />
-      )}
+      </>
+    );
+  }
 
-      {currentView === 'caregiver-settings' && isLoggedIn && (
+  if (currentView === 'caregiver-settings' && isLoggedIn && currentCaregiver) {
+    return (
+      <>
+        {renderFirebaseError()}
+
         <CaregiverSettings
-          caregiverEmail={currentCaregiver!}
+          caregiverEmail={currentCaregiver}
           onBack={() => setCurrentView('patient-selection')}
           onSelectPatient={handlePatientSelect}
         />
-      )}
+      </>
+    );
+  }
 
-      {currentView === 'caregiver-dashboard' && isLoggedIn && (
+  if (
+    currentView === 'caregiver-dashboard' &&
+    isLoggedIn &&
+    currentCaregiver &&
+    selectedPatientId &&
+    selectedPatientName
+  ) {
+    return (
+      <>
+        {renderFirebaseError()}
+
         <CaregiverDashboard
-          caregiverEmail={currentCaregiver!}
-          patientId={selectedPatientId!}
-          patientName={selectedPatientName!}
+          caregiverEmail={currentCaregiver}
+          patientId={selectedPatientId}
+          patientName={selectedPatientName}
           onLogout={handleLogout}
           onBack={handleBackToPatientSelection}
         />
-      )}
+      </>
+    );
+  }
 
-      {currentView === 'patient' && (
+  if (currentView === 'patient') {
+    return (
+      <>
+        {renderFirebaseError()}
+
         <PatientHomeScreen
           patientId={linkedPatientId}
           patientName={linkedPatientName}
@@ -194,9 +241,15 @@ export default function App() {
             setCurrentView('account-linking');
           }}
         />
-      )}
+      </>
+    );
+  }
 
-      {currentView === 'patient-settings' && (
+  if (currentView === 'patient-settings') {
+    return (
+      <>
+        {renderFirebaseError()}
+
         <PatientSettings
           linkedPatientName={linkedPatientName}
           onBack={() => setCurrentView('patient')}
@@ -206,14 +259,158 @@ export default function App() {
           }}
           onUnlink={handleUnlinkPatient}
         />
-      )}
+      </>
+    );
+  }
 
-      {currentView === 'account-linking' && (
+  if (currentView === 'account-linking') {
+    return (
+      <>
+        {renderFirebaseError()}
+
         <AccountLinking
           onComplete={handleLinkComplete}
-          onBack={() => setCurrentView(accountLinkReturnView ?? 'home')}
+          onBack={() => setCurrentView(accountLinkReturnView)}
         />
-      )}
-    </div>
+      </>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      {renderFirebaseError()}
+
+      <ScrollView contentContainerStyle={styles.homePage}>
+        <View style={styles.landingHeader}>
+          <LogoBrand size="lg" />
+
+          <Text style={styles.subtitle}>
+            Reminders for patients and caregivers
+          </Text>
+        </View>
+
+        <View style={styles.mainActions}>
+          <Button onPress={() => setCurrentView('patient')} style={styles.fullButton}>
+            My reminders
+          </Button>
+        </View>
+
+        <View style={styles.footerActions}>
+          <Button
+            variant="secondary"
+            onPress={() => {
+              if (isLoggedIn && currentCaregiver) {
+                setCurrentView('patient-selection');
+              } else {
+                setCurrentView('caregiver-login');
+              }
+            }}
+            style={styles.fullButton}
+          >
+            Caregiver login
+          </Button>
+
+          <Button
+            variant="ghost"
+            onPress={() => {
+              setAccountLinkReturnView('home');
+              setCurrentView('account-linking');
+            }}
+            style={styles.fullButton}
+          >
+            Link account
+          </Button>
+
+          <Text style={styles.hint}>
+            Ask your caregiver for a linking code.
+          </Text>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#F7F7F7',
+  },
+
+  homePage: {
+    flexGrow: 1,
+    padding: 24,
+    backgroundColor: '#F7F7F7',
+    justifyContent: 'space-between',
+  },
+
+  warningBanner: {
+    backgroundColor: '#FEF3C7',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F59E0B',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+
+  warningText: {
+    color: '#92400E',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 10,
+  },
+
+  warningActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+
+  warningButton: {
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#F59E0B',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+
+  warningButtonText: {
+    color: '#92400E',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+
+  landingHeader: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingTop: 48,
+  },
+
+  subtitle: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#666666',
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+
+  mainActions: {
+    width: '100%',
+    gap: 16,
+  },
+
+  footerActions: {
+    width: '100%',
+    gap: 14,
+    paddingBottom: 24,
+  },
+
+  fullButton: {
+    width: '100%',
+  },
+
+  hint: {
+    fontSize: 14,
+    color: '#777777',
+    textAlign: 'center',
+    marginTop: 4,
+  },
+});
