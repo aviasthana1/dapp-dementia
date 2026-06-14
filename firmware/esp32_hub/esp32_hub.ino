@@ -1,7 +1,7 @@
 /**
  * CareConnect BLE hub — reference firmware
  *
- * - Scans BLE for manufacturer data: [roomId, direction, 0x00]
+ * - Scans BLE for manufacturer data: [roomId, direction, patientConfirmed]
  * - POSTs to rooms/room_N/events, PATCHes lastEntry/lastExit
  * - Set TEST_FIRESTORE_ON_BOOT true to verify Firebase without BLE
  *
@@ -62,6 +62,7 @@ struct {
   volatile bool ready;
   uint8_t roomId;
   uint8_t direction;
+  uint8_t patientConfirmed;
 } pendingEvent;
 
 WiFiClientSecure secureClient;
@@ -198,7 +199,7 @@ const char* getRoomName(uint8_t roomId) {
 /** Build Firestore REST "fields" object (ArduinoJson-safe nesting). */
 void writeFirestoreFields(JsonDocument& doc, const char* type, uint8_t roomId,
                           const char* roomName, unsigned long timestampSec,
-                          const char* timeLocal) {
+                          const char* timeLocal, bool patientConfirmed) {
   JsonObject fields = doc.createNestedObject("fields");
 
   JsonObject fType = fields.createNestedObject("type");
@@ -215,6 +216,9 @@ void writeFirestoreFields(JsonDocument& doc, const char* type, uint8_t roomId,
 
   JsonObject fLocal = fields.createNestedObject("timeLocal");
   fLocal["stringValue"] = timeLocal;
+
+  JsonObject fConfirmed = fields.createNestedObject("patientConfirmed");
+  fConfirmed["booleanValue"] = patientConfirmed;
 }
 
 /** Format current time as "YYYY-MM-DD HH:MM:SS" for logs + Firestore. */
@@ -293,7 +297,7 @@ bool patchJson(const char* url, const char* jsonBody, const char* label) {
   return code >= 200 && code < 300;
 }
 
-bool logEvent(uint8_t roomId, const char* roomName, const char* eventType) {
+bool logEvent(uint8_t roomId, const char* roomName, const char* eventType, bool patientConfirmed) {
   Serial.println("[FIREBASE] ---- logEvent START ----");
   Serial.flush();
 
@@ -315,7 +319,7 @@ bool logEvent(uint8_t roomId, const char* roomName, const char* eventType) {
   }
 
   StaticJsonDocument<512> doc;
-  writeFirestoreFields(doc, eventType, roomId, roomName, timestampSec, timeLocal.c_str());
+  writeFirestoreFields(doc, eventType, roomId, roomName, timestampSec, timeLocal.c_str(), patientConfirmed);
 
   char body[400];
   serializeJson(doc, body, sizeof(body));
@@ -325,8 +329,8 @@ bool logEvent(uint8_t roomId, const char* roomName, const char* eventType) {
            "https://firestore.googleapis.com/v1/projects/%s/databases/(default)/documents/rooms/room_%u/events?key=%s",
            FIREBASE_PROJECT_ID, roomId, FIREBASE_API_KEY);
 
-  Serial.printf("[FIREBASE] POST room_%u/events ts=%lu timeLocal=%s\n",
-                roomId, timestampSec, timeLocal.c_str());
+  Serial.printf("[FIREBASE] POST room_%u/events ts=%lu timeLocal=%s patientConfirmed=%s\n",
+                roomId, timestampSec, timeLocal.c_str(), patientConfirmed ? "true" : "false");
   Serial.println(body);
   Serial.flush();
   return postJson(url, body, "logEvent");
@@ -360,12 +364,13 @@ bool updateRoom(uint8_t roomId, const char* eventType) {
   return patchJson(url, body, "updateRoom");
 }
 
-void queueBleEvent(uint8_t roomId, uint8_t direction) {
+void queueBleEvent(uint8_t roomId, uint8_t direction, uint8_t patientConfirmed) {
   pendingEvent.roomId = roomId;
   pendingEvent.direction = direction;
+  pendingEvent.patientConfirmed = patientConfirmed;
   pendingEvent.ready = true;
-  Serial.printf("[BLE] Queued room_%d %s — uploading in main loop...\n",
-                roomId, direction == 1 ? "ENTRY" : "EXIT");
+  Serial.printf("[BLE] Queued room_%d %s (patientConfirmed=%u) — uploading in main loop...\n",
+                roomId, direction == 1 ? "ENTRY" : "EXIT", patientConfirmed);
 }
 
 void processPendingEvent() {
@@ -382,6 +387,7 @@ void processPendingEvent() {
   pendingEvent.ready = false;
   uint8_t roomId = pendingEvent.roomId;
   uint8_t direction = pendingEvent.direction;
+  uint8_t patientConfirmed = pendingEvent.patientConfirmed;
   const char* roomName = getRoomName(roomId);
   const char* eventType = (direction == 1) ? "ENTRY" : "EXIT";
 
@@ -395,7 +401,7 @@ void processPendingEvent() {
   Serial.printf("[FIREBASE] Project: %s\n", FIREBASE_PROJECT_ID);
   Serial.flush();
 
-  bool saved = logEvent(roomId, roomName, eventType);
+  bool saved = logEvent(roomId, roomName, eventType, patientConfirmed == 1);
   bool patched = updateRoom(roomId, eventType);
 
   if (saved) {
@@ -411,12 +417,13 @@ void processPendingEvent() {
 
 void firestoreBootTest() {
   Serial.println("[TEST] Posting test ENTRY to room_1 (no BLE)...");
-  queueBleEvent(1, 1);
+  queueBleEvent(1, 1, 1);
   processPendingEvent();
 }
 
-/** Parse [roomId, direction, 0] or [companyId lo/hi, roomId, direction, 0]. */
-bool parseBlePacket(const std::string& data, uint8_t& roomId, uint8_t& direction) {
+/** Parse [roomId, direction, patientConfirmed] or [companyId lo/hi, roomId, direction, patientConfirmed]. */
+bool parseBlePacket(const std::string& data, uint8_t& roomId, uint8_t& direction,
+                    uint8_t& patientConfirmed) {
   if (data.length() < 3) return false;
 
   size_t off = 0;
@@ -428,11 +435,11 @@ bool parseBlePacket(const std::string& data, uint8_t& roomId, uint8_t& direction
 
   roomId = (uint8_t)data[off];
   direction = (uint8_t)data[off + 1];
-  uint8_t reserved = (uint8_t)data[off + 2];
+  patientConfirmed = (uint8_t)data[off + 2];
 
   if (roomId < 1 || roomId > 7) return false;
   if (direction != 0 && direction != 1) return false;
-  if (reserved != 0x00) return false;
+  if (patientConfirmed != 0 && patientConfirmed != 1) return false;
   return true;
 }
 
@@ -459,9 +466,10 @@ class AdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
 
     uint8_t roomId = 0;
     uint8_t direction = 0;
-    if (!parseBlePacket(data, roomId, direction)) {
+    uint8_t patientConfirmed = 0;
+    if (!parseBlePacket(data, roomId, direction, patientConfirmed)) {
 #if DEBUG_BLE_RAW
-      Serial.println("[BLE] ignored — not CareConnect format (need roomId 1-7, dir 0/1, then 0x00)");
+      Serial.println("[BLE] ignored — not CareConnect format (need roomId 1-7, dir 0/1, patientConfirmed 0/1)");
 #endif
       return;
     }
@@ -475,10 +483,10 @@ class AdvertisedDeviceCallbacks : public BLEAdvertisedDeviceCallbacks {
     }
     lastBleByRoom[roomId] = now;
 
-    Serial.printf("[BLE] RoomID=%d Direction=%s\n",
-                  roomId, direction == 1 ? "ENTRY" : "EXIT");
+    Serial.printf("[BLE] RoomID=%d Direction=%s patientConfirmed=%u\n",
+                  roomId, direction == 1 ? "ENTRY" : "EXIT", patientConfirmed);
     logTimestamp("BLE detected");
-    queueBleEvent(roomId, direction);
+    queueBleEvent(roomId, direction, patientConfirmed);
   }
 };
 

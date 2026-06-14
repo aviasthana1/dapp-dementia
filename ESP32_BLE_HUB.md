@@ -101,19 +101,33 @@ The API key identifies the Firebase project; it is **not** a secret bypass for r
 
 ## Timestamps (no ESP32 changes needed)
 
-The hub may send wrong `timestamp` / `timeLocal` values. **Server time** is applied in two places:
+The hub may send wrong `timestamp` / `timeLocal` values (device has no real clock).
 
-1. **Cloud Function** `stampHubRoomEvent` — on each new `rooms/room_N/events/*` doc, sets `timestamp` and `lastEntry` / `lastExit` with `FieldValue.serverTimestamp()`. Deploy once:
+### Firestore rules cannot fix timestamps
 
-   ```bash
-   cd functions && npm install && cd ..
-   firebase login
-   firebase deploy --only functions:stampHubRoomEvent
-   ```
+**Security rules only allow or deny reads/writes.** They cannot run `serverTimestamp()` or change fields. Pasting something into `firestore.rules` will not stamp times.
 
-   Requires the Blaze plan (Firebase free tier + billing enabled for Functions).
+Keep your open demo rules as-is:
 
-2. **Web app** — when mirroring ENTRY into `patients/{id}/location`, uses `serverTimestamp()` for `time` (caregiver dashboard).
+```text
+allow read, write: if true;
+```
+
+### Free Spark plan (no Blaze) — **web app repair** (already in this repo)
+
+When **anyone has the CareConnect web app open** (`npm run dev` or hosted build), it listens for new `rooms/room_N/events` docs and, if the timestamp is invalid, updates them with **`serverTimestamp()`** from the browser (field `stampedByClient: true`).
+
+- Works on the **free Spark plan**
+- No Cloud Functions deploy
+- Caveat: if the app is **closed** when the ESP32 writes, the event stays wrong until someone opens the app again
+
+### Optional: Cloud Function (needs Blaze)
+
+If you upgrade to Blaze later, `stampHubRoomEvent` stamps events immediately on the server (even when the app is closed):
+
+```bash
+npm run deploy:hub-timestamps
+```
 
 Keep flashing the ESP32 sketch you already have; no need to change `.ino` for timestamps.
 

@@ -1,6 +1,7 @@
 /**
- * ESP32 BLE hub → Firestore `rooms/room_{n}` and `rooms/room_{n}/events`.
- * The web app mirrors ENTRY events into `patients/{id}/location` for the caregiver UI.
+ * ESP32 BLE hub (v2.5) → Firestore `rooms/room_{n}/events`.
+ * Event fields: type, roomId, roomName, patientConfirmed (no timestamp from hub).
+ * The web app uses Firestore createTime for display and stamps confirmed events when open.
  */
 import {
   collection,
@@ -8,12 +9,13 @@ import {
   getDoc,
   getDocs,
   setDoc,
+  updateDoc,
   serverTimestamp,
   writeBatch,
   query,
-  orderBy,
   limit,
   onSnapshot,
+  type QueryDocumentSnapshot,
   type Timestamp,
   type Unsubscribe,
 } from "firebase/firestore";
@@ -83,6 +85,95 @@ export function parseHubTimeMs(raw: unknown): number {
 export function normalizeHubTimestamp(raw: unknown): number {
   const ms = parseHubTimeMs(raw);
   return ms > 0 ? ms : Date.now();
+}
+
+/** Format hub/location epoch ms for patient & caregiver UI. */
+export function formatHubActivityTime(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "Just now";
+  return new Date(ms).toLocaleString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+export type HubActivity = {
+  id: string;
+  roomId: number;
+  roomName: string;
+  type: string;
+  timeMs: number;
+  timeLabel: string;
+  patientConfirmed: boolean;
+};
+
+function isPatientConfirmed(data: Record<string, unknown>): boolean {
+  return data.patientConfirmed === true || data.patientconfirmed === true;
+}
+
+/** Hub v2.5 posts no timestamp — use Firestore createTime until client stamp runs. */
+function getHubEventTimeMs(
+  data: Record<string, unknown>,
+  docCreateTime?: Timestamp
+): number {
+  const fromField = parseHubTimeMs(data.timestamp);
+  if (fromField > 0) return fromField;
+  if (docCreateTime) {
+    const ms = docCreateTime.toMillis();
+    if (Number.isFinite(ms) && ms > 0) return ms;
+  }
+  return 0;
+}
+
+function hubActivityTimeLabel(patientConfirmed: boolean, timeMs: number, timeLocal: string): string {
+  if (!patientConfirmed) return "";
+  if (timeMs > 0) return formatHubActivityTime(timeMs);
+  if (timeLocal) return timeLocal;
+  return "";
+}
+
+function parseHubActivityDoc(
+  d: QueryDocumentSnapshot,
+  roomId: number,
+  defaultRoomName: string
+): HubActivity {
+  const data = d.data() as Record<string, unknown>;
+  const patientConfirmed = isPatientConfirmed(data);
+  const timeMs = getHubEventTimeMs(data, d.createTime);
+  const timeLocal = typeof data.timeLocal === "string" ? data.timeLocal : "";
+  return {
+    id: d.id,
+    roomId,
+    roomName:
+      typeof data.roomName === "string" && data.roomName ? data.roomName : defaultRoomName,
+    type: typeof data.type === "string" ? data.type : "EVENT",
+    timeMs,
+    timeLabel: hubActivityTimeLabel(patientConfirmed, timeMs, timeLocal),
+    patientConfirmed,
+  };
+}
+
+const HUB_EVENTS_PER_ROOM = 20;
+
+/** Collapse duplicate hub writes (same room + type + displayed minute). */
+function hubActivityDedupeKey(e: HubActivity): string {
+  const minute = e.timeMs > 0 ? Math.floor(e.timeMs / 60_000) : e.timeLabel;
+  return `${e.roomId}_${e.type}_${minute}`;
+}
+
+function dedupeHubActivities(events: HubActivity[]): HubActivity[] {
+  const seen = new Set<string>();
+  const result: HubActivity[] = [];
+  for (const e of events) {
+    const key = hubActivityDedupeKey(e);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(e);
+  }
+  return result;
 }
 
 /** Create `rooms/room_1` … `room_7` so ESP32 PATCH succeeds. */
@@ -167,28 +258,124 @@ export function subscribeRoomStates(
   );
 }
 
+/** Human-readable local time string (client-side, no Cloud Function). */
+function formatTimeLocalClient(date = new Date()): string {
+  return date.toLocaleString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+}
+
+function hubEventNeedsTimestampStamp(data: Record<string, unknown>): boolean {
+  if (!isPatientConfirmed(data)) return false;
+  if (data.stampedByClient === true || data.stampedAtServer === true) return false;
+  return parseHubTimeMs(data.timestamp) <= 0;
+}
+
+/** Fix bad ESP32 clocks using web SDK serverTimestamp (Spark plan — no Blaze). */
+async function stampHubEventFromClient(
+  roomId: number,
+  eventId: string,
+  data: Record<string, unknown>
+): Promise<void> {
+  if (!hubEventNeedsTimestampStamp(data)) return;
+
+  const eventRef = doc(db, ROOM_COLLECTION, roomDocId(roomId), "events", eventId);
+  const roomRef = doc(db, ROOM_COLLECTION, roomDocId(roomId));
+  const type = typeof data.type === "string" ? data.type : "";
+  const timeLocal = formatTimeLocalClient();
+
+  const batch = writeBatch(db);
+  batch.update(eventRef, {
+    timestamp: serverTimestamp(),
+    timeLocal,
+    stampedByClient: true,
+  });
+
+  if (type === "ENTRY") {
+    batch.update(roomRef, { lastEntry: serverTimestamp() });
+  } else if (type === "EXIT") {
+    batch.update(roomRef, { lastExit: serverTimestamp() });
+  }
+
+  await batch.commit();
+}
+
+/**
+ * When the web app is open, rewrite hub events with invalid timestamps.
+ * Replaces Cloud Functions on the free Spark plan (rules alone cannot set server time).
+ */
+export function startHubTimestampRepair(onError?: (err: Error) => void): Unsubscribe {
+  const unsubs: Unsubscribe[] = [];
+  const stamping = new Set<string>();
+
+  for (const seed of SEED_ROOMS) {
+    const roomId = seed.roomId;
+    const eventsRef = collection(db, ROOM_COLLECTION, roomDocId(roomId), "events");
+    const q = query(eventsRef, limit(HUB_EVENTS_PER_ROOM));
+
+    unsubs.push(
+      onSnapshot(
+        q,
+        (snap) => {
+          for (const change of snap.docChanges()) {
+            if (change.type === "removed") continue;
+            const data = change.doc.data() as Record<string, unknown>;
+            if (!hubEventNeedsTimestampStamp(data)) continue;
+
+            const key = `${roomId}_${change.doc.id}`;
+            if (stamping.has(key)) continue;
+            stamping.add(key);
+
+            void stampHubEventFromClient(roomId, change.doc.id, data)
+              .catch((e) => onError?.(e instanceof Error ? e : new Error(String(e))))
+              .finally(() => stamping.delete(key));
+          }
+        },
+        (err) => onError?.(err)
+      )
+    );
+  }
+
+  return () => unsubs.forEach((u) => u());
+}
+
 async function mirrorEntryToPatientLocation(
   patientId: string,
   roomId: number,
   eventDocId: string,
-  data: { roomName?: string; type?: string; timestamp?: unknown }
+  data: Record<string, unknown>,
+  docCreateTime?: Timestamp
 ): Promise<void> {
-  if (data.type !== "ENTRY") return;
+  if (data.type !== "ENTRY" || !isPatientConfirmed(data)) return;
 
   const locId = `ble_r${roomId}_${eventDocId}`;
   const locRef = doc(db, PATIENTS_COLLECTION, patientId, "location", locId);
-  const existing = await getDoc(locRef);
-  if (existing.exists()) return;
 
   const room =
     typeof data.roomName === "string" && data.roomName
       ? data.roomName
       : SEED_ROOMS.find((r) => r.roomId === roomId)?.name ?? `Room ${roomId}`;
 
+  const timeMs = getHubEventTimeMs(data, docCreateTime);
+  const existing = await getDoc(locRef);
+
+  if (existing.exists()) {
+    const prevMs = parseHubTimeMs(existing.data()?.time);
+    if (timeMs > 0 && (prevMs <= 0 || prevMs < 1_000_000_000_000)) {
+      await updateDoc(locRef, { room, time: timeMs, source: "esp32" });
+    }
+    return;
+  }
+
   await setDoc(locRef, {
     room,
-    time: serverTimestamp(),
     source: "esp32",
+    ...(timeMs > 0 ? { time: timeMs } : { time: serverTimestamp() }),
   });
 }
 
@@ -206,20 +393,32 @@ function startHubLocationSyncInner(
   for (const seed of SEED_ROOMS) {
     const roomId = seed.roomId;
     const eventsRef = collection(db, ROOM_COLLECTION, roomDocId(roomId), "events");
-    const q = query(eventsRef, orderBy("timestamp", "desc"), limit(10));
+    const q = query(eventsRef, limit(HUB_EVENTS_PER_ROOM));
 
     unsubs.push(
       onSnapshot(
         q,
         (snap) => {
           for (const change of snap.docChanges()) {
-            if (change.type !== "added" && change.type !== "modified") continue;
+            if (change.type === "removed") continue;
             const dedupeKey = `${roomId}_${change.doc.id}`;
-            if (seen.has(dedupeKey)) continue;
-            seen.add(dedupeKey);
+            if (change.type === "added") {
+              if (seen.has(dedupeKey)) continue;
+              seen.add(dedupeKey);
+            }
 
-            void mirrorEntryToPatientLocation(patientId, roomId, change.doc.id, change.doc.data()).catch(
-              (e) => onError?.(e instanceof Error ? e : new Error(String(e)))
+            const data = change.doc.data() as Record<string, unknown>;
+
+            void mirrorEntryToPatientLocation(
+              patientId,
+              roomId,
+              change.doc.id,
+              data,
+              change.doc.createTime
+            ).catch((e) => onError?.(e instanceof Error ? e : new Error(String(e))));
+
+            void stampHubEventFromClient(roomId, change.doc.id, data).catch((e) =>
+              onError?.(e instanceof Error ? e : new Error(String(e)))
             );
           }
         },
@@ -250,4 +449,46 @@ export function startHubLocationSync(
     cancelled = true;
     innerUnsub?.();
   };
+}
+
+/** Live BLE hub activity — only events the hub marked patientConfirmed. */
+export function subscribeRecentHubEvents(
+  onUpdate: (events: HubActivity[]) => void,
+  onError?: (err: Error) => void,
+  maxEvents = 6
+): Unsubscribe {
+  const unsubs: Unsubscribe[] = [];
+  const latestByRoom = new Map<number, HubActivity[]>();
+
+  const publish = () => {
+    const merged = dedupeHubActivities(
+      Array.from(latestByRoom.values())
+        .flat()
+        .filter((e) => e.patientConfirmed && (e.type === "ENTRY" || e.type === "EXIT"))
+        .sort((a, b) => b.timeMs - a.timeMs)
+    ).slice(0, maxEvents);
+    onUpdate(merged);
+  };
+
+  for (const seed of SEED_ROOMS) {
+    const roomId = seed.roomId;
+    const eventsRef = collection(db, ROOM_COLLECTION, roomDocId(roomId), "events");
+    const q = query(eventsRef, limit(HUB_EVENTS_PER_ROOM));
+
+    unsubs.push(
+      onSnapshot(
+        q,
+        (snap) => {
+          const roomEvents = snap.docs
+            .map((d) => parseHubActivityDoc(d, roomId, seed.name))
+            .filter((e) => e.patientConfirmed);
+          latestByRoom.set(roomId, roomEvents);
+          publish();
+        },
+        (err) => onError?.(err)
+      )
+    );
+  }
+
+  return () => unsubs.forEach((u) => u());
 }

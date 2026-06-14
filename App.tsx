@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { seedInitialDataIfEmpty } from './src/services/firestoreData';
+import { startHubTimestampRepair } from './src/services/roomTracking';
 import { firebaseProjectId } from './src/services/firebase';
 import {
   getStoredCaregiverEmail,
@@ -15,8 +16,18 @@ import { PatientHomeScreen } from './components/PatientHomeScreen';
 import { PatientSettings } from './components/PatientSettings';
 import { AccountLinking } from './components/AccountLinking';
 import { LogoMark } from './components/Logo';
+import { Button, Page, PageTitle } from './components/ui';
 
-type View = 'home' | 'caregiver-login' | 'patient-selection' | 'caregiver-dashboard' | 'caregiver-settings' | 'patient' | 'patient-settings' | 'account-linking';
+type View =
+  | 'home'
+  | 'caregiver-login'
+  | 'patient-selection'
+  | 'caregiver-dashboard'
+  | 'caregiver-settings'
+  | 'patient-entry'
+  | 'patient'
+  | 'patient-settings'
+  | 'account-linking';
 
 export default function App() {
   const [firebaseError, setFirebaseError] = useState<string | null>(null);
@@ -29,6 +40,11 @@ export default function App() {
       }
       console.warn('Firebase seed:', err);
     });
+
+    const unsubStamp = startHubTimestampRepair((err) => {
+      console.warn('Hub timestamp repair:', err);
+    });
+    return () => unsubStamp();
   }, []);
 
   const [currentView, setCurrentView] = useState<View>('home');
@@ -43,6 +59,31 @@ export default function App() {
     () => getStoredLinkedPatient()?.name ?? null
   );
   const [accountLinkReturnView, setAccountLinkReturnView] = useState<View>('home');
+
+  useEffect(() => {
+    if (currentView === 'caregiver-dashboard' && isLoggedIn && !selectedPatientId) {
+      setCurrentView('patient-selection');
+    }
+  }, [currentView, isLoggedIn, selectedPatientId]);
+
+  const openCaregiverFlow = () => {
+    setSelectedPatientId(null);
+    setSelectedPatientName(null);
+    if (isLoggedIn && currentCaregiver) {
+      setCurrentView('patient-selection');
+    } else {
+      setCurrentView('caregiver-login');
+    }
+  };
+
+  const openPatientFlow = () => {
+    if (linkedPatientId) {
+      setCurrentView('patient-entry');
+    } else {
+      setAccountLinkReturnView('patient');
+      setCurrentView('account-linking');
+    }
+  };
 
   const handleCaregiverLogin = (email: string) => {
     setIsLoggedIn(true);
@@ -84,6 +125,8 @@ export default function App() {
     setLinkedPatientId(null);
     setLinkedPatientName(null);
     setStoredLinkedPatient(null);
+    setAccountLinkReturnView('home');
+    setCurrentView('account-linking');
   };
 
   return (
@@ -119,13 +162,7 @@ export default function App() {
               <button
                 type="button"
                 className="home-btn home-btn--caregiver"
-                onClick={() => {
-                  if (isLoggedIn && currentCaregiver) {
-                    setCurrentView('patient-selection');
-                  } else {
-                    setCurrentView('caregiver-login');
-                  }
-                }}
+                onClick={openCaregiverFlow}
               >
                 Caregiver
               </button>
@@ -133,7 +170,7 @@ export default function App() {
               <button
                 type="button"
                 className="home-btn home-btn--patient"
-                onClick={() => setCurrentView('patient')}
+                onClick={openPatientFlow}
               >
                 Patient
               </button>
@@ -177,14 +214,46 @@ export default function App() {
         />
       )}
 
-      {currentView === 'caregiver-dashboard' && isLoggedIn && (
+      {currentView === 'caregiver-dashboard' && isLoggedIn && selectedPatientId && selectedPatientName && (
         <CaregiverDashboard
           caregiverEmail={currentCaregiver!}
-          patientId={selectedPatientId!}
-          patientName={selectedPatientName!}
+          patientId={selectedPatientId}
+          patientName={selectedPatientName}
           onLogout={handleLogout}
           onBack={handleBackToPatientSelection}
         />
+      )}
+
+      {currentView === 'patient-entry' && linkedPatientId && (
+        <Page>
+          <PageTitle
+            showLogo
+            title="Patient device"
+            subtitle={
+              linkedPatientName
+                ? `This device is linked as ${linkedPatientName}.`
+                : 'This device is linked to a patient account.'
+            }
+          />
+          <div className="stack">
+            <Button className="w-full" onClick={() => setCurrentView('patient')}>
+              Continue as {linkedPatientName ?? 'patient'}
+            </Button>
+            <Button
+              variant="secondary"
+              className="w-full"
+              onClick={() => {
+                setAccountLinkReturnView('patient');
+                setCurrentView('account-linking');
+              }}
+            >
+              Link a different account
+            </Button>
+            <Button variant="ghost" className="w-full" onClick={() => setCurrentView('home')}>
+              Back to home
+            </Button>
+          </div>
+        </Page>
       )}
 
       {currentView === 'patient' && (
