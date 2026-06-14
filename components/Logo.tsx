@@ -1,9 +1,10 @@
-type LogoSize = 'sm' | 'md' | 'lg';
+type LogoSize = 'sm' | 'md' | 'lg' | 'xl';
 
-const SIZES: Record<LogoSize, number> = {
-  sm: 32,
-  md: 40,
-  lg: 56,
+const WIDTHS: Record<LogoSize, number> = {
+  sm: 48,
+  md: 72,
+  lg: 120,
+  xl: 200,
 };
 
 type LogoMarkProps = {
@@ -11,30 +12,18 @@ type LogoMarkProps = {
   className?: string;
 };
 
-/** Minimal mark: linked nodes + reminder dot (care + connection). */
+/** CareConnect brand image (public/logo.png) */
 export function LogoMark({ size = 'md', className = '' }: LogoMarkProps) {
-  const px = SIZES[size];
+  const width = WIDTHS[size];
+
   return (
-    <svg
-      width={px}
-      height={px}
-      viewBox="0 0 48 48"
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-      className={className}
-      aria-hidden
-    >
-      <rect width="48" height="48" rx="12" fill="currentColor" />
-      <circle cx="17" cy="24" r="5.5" stroke="#fff" strokeWidth="2" />
-      <circle cx="31" cy="24" r="5.5" stroke="#fff" strokeWidth="2" />
-      <path
-        d="M22.5 24h3"
-        stroke="#fff"
-        strokeWidth="2"
-        strokeLinecap="round"
-      />
-      <circle cx="24" cy="34" r="2.5" fill="#fff" />
-    </svg>
+    <img
+      src="/logo.png"
+      alt="CareConnect"
+      width={width}
+      height={Math.round(width * 0.72)}
+      className={`logo-image ${className}`.trim()}
+    />
   );
 }
 

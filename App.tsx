@@ -14,8 +14,7 @@ import { CaregiverSettings } from './components/CaregiverSettings';
 import { PatientHomeScreen } from './components/PatientHomeScreen';
 import { PatientSettings } from './components/PatientSettings';
 import { AccountLinking } from './components/AccountLinking';
-import { LogoBrand } from './components/Logo';
-import { Button } from './components/ui';
+import { LogoMark } from './components/Logo';
 
 type View = 'home' | 'caregiver-login' | 'patient-selection' | 'caregiver-dashboard' | 'caregiver-settings' | 'patient' | 'patient-settings' | 'account-linking';
 
@@ -109,44 +108,48 @@ export default function App() {
       )}
 
       {currentView === 'home' && (
-        <div className="landing">
-          <header className="landing-header">
-            <LogoBrand size="lg" className="mb-2" />
-            <p className="page-subtitle">Reminders for patients and caregivers</p>
-          </header>
+        <div className="home-screen">
+          <div className="home-screen-inner">
+            <header className="home-header">
+              <LogoMark size="xl" className="home-logo" />
+              <p className="home-subtitle">Patient & Caregiver Reminder System</p>
+            </header>
 
-          <main className="landing-main stack">
-            <Button className="w-full" onClick={() => setCurrentView('patient')}>
-              My reminders
-            </Button>
-          </main>
+            <nav className="home-actions" aria-label="Get started">
+              <button
+                type="button"
+                className="home-btn home-btn--caregiver"
+                onClick={() => {
+                  if (isLoggedIn && currentCaregiver) {
+                    setCurrentView('patient-selection');
+                  } else {
+                    setCurrentView('caregiver-login');
+                  }
+                }}
+              >
+                Caregiver
+              </button>
 
-          <footer className="landing-footer">
-            <Button
-              variant="secondary"
-              className="w-full"
-              onClick={() => {
-                if (isLoggedIn && currentCaregiver) {
-                  setCurrentView('patient-selection');
-                } else {
-                  setCurrentView('caregiver-login');
-                }
-              }}
-            >
-              Caregiver login
-            </Button>
-            <Button
-              variant="ghost"
-              className="w-full"
-              onClick={() => {
-                setAccountLinkReturnView('home');
-                setCurrentView('account-linking');
-              }}
-            >
-              Link account
-            </Button>
-            <p className="landing-hint">Ask your caregiver for a linking code.</p>
-          </footer>
+              <button
+                type="button"
+                className="home-btn home-btn--patient"
+                onClick={() => setCurrentView('patient')}
+              >
+                Patient
+              </button>
+
+              <button
+                type="button"
+                className="home-btn home-btn--link"
+                onClick={() => {
+                  setAccountLinkReturnView('home');
+                  setCurrentView('account-linking');
+                }}
+              >
+                Link Account
+              </button>
+            </nav>
+          </div>
         </div>
       )}
 
