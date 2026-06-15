@@ -1,6 +1,7 @@
 const CAREGIVER_EMAIL_KEY = "careconnect_caregiver_email";
 const LINKED_PATIENT_ID_KEY = "careconnect_linked_patient_id";
 const LINKED_PATIENT_NAME_KEY = "careconnect_linked_patient_name";
+const CONSENT_KEY = "careconnect_consent_accepted";
 
 function storage(): Storage | null {
   try {
@@ -39,4 +40,15 @@ export function setStoredLinkedPatient(id: string | null, name?: string | null):
     s.removeItem(LINKED_PATIENT_ID_KEY);
     s.removeItem(LINKED_PATIENT_NAME_KEY);
   }
+}
+
+export function hasStoredConsent(): boolean {
+  return storage()?.getItem(CONSENT_KEY) === "true";
+}
+
+export function setStoredConsent(accepted: boolean): void {
+  const s = storage();
+  if (!s) return;
+  if (accepted) s.setItem(CONSENT_KEY, "true");
+  else s.removeItem(CONSENT_KEY);
 }

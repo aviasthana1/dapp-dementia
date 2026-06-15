@@ -7,7 +7,10 @@ import {
   setStoredCaregiverEmail,
   getStoredLinkedPatient,
   setStoredLinkedPatient,
+  hasStoredConsent,
+  setStoredConsent,
 } from './src/services/session';
+import { ConsentDialog } from './components/ConsentDialog';
 import { CaregiverLogin } from './components/CaregiverLogin';
 import { PatientSelectionDashboard } from './components/PatientSelectionDashboard';
 import { CaregiverDashboard } from './components/CaregiverDashboard';
@@ -31,6 +34,7 @@ type View =
 
 export default function App() {
   const [firebaseError, setFirebaseError] = useState<string | null>(null);
+  const [consentAccepted, setConsentAccepted] = useState(() => hasStoredConsent());
 
   useEffect(() => {
     seedInitialDataIfEmpty().catch((err) => {
@@ -131,6 +135,15 @@ export default function App() {
 
   return (
     <div className="min-h-screen app-page">
+      {!consentAccepted && (
+        <ConsentDialog
+          onAccept={() => {
+            setStoredConsent(true);
+            setConsentAccepted(true);
+          }}
+        />
+      )}
+
       {firebaseError && (
         <div className="banner-warn flex items-center justify-between gap-3 flex-wrap">
           <p>{firebaseError}</p>
