@@ -1,6 +1,11 @@
 import { useState, useEffect } from 'react';
-import { seedInitialDataIfEmpty } from './src/services/firestoreData';
-import { startHubTimestampRepair } from './src/services/roomTracking';
+import { seedInitialDataIfEmpty, ensureBathroomReminderForPatient } from './src/services/firestoreData';
+import {
+  getHubPatientId,
+  reconcileBathroomReminder,
+  startHubTimestampRepair,
+  startHubPatientSync,
+} from './src/services/roomTracking';
 import { firebaseProjectId } from './src/services/firebase';
 import {
   getStoredCaregiverEmail,
@@ -37,19 +42,35 @@ export default function App() {
   const [consentAccepted, setConsentAccepted] = useState(() => hasStoredConsent());
 
   useEffect(() => {
-    seedInitialDataIfEmpty().catch((err) => {
-      const msg = err?.message ?? '';
-      if (msg.includes('permission') || msg.includes('Permission')) {
-        setFirebaseError('Firestore permission denied. Add rules in Firebase Console → Firestore → Rules (see FIRESTORE.md).');
-      }
-      console.warn('Firebase seed:', err);
-    });
+    if (!consentAccepted) return;
+
+    seedInitialDataIfEmpty()
+      .then(async () => {
+        const hubPatientId = await getHubPatientId();
+        if (hubPatientId) {
+          await ensureBathroomReminderForPatient(hubPatientId);
+          await reconcileBathroomReminder(hubPatientId);
+        }
+      })
+      .catch((err) => {
+        const msg = err?.message ?? '';
+        if (msg.includes('permission') || msg.includes('Permission')) {
+          setFirebaseError('Firestore permission denied. Add rules in Firebase Console → Firestore → Rules (see FIRESTORE.md).');
+        }
+        console.warn('Firebase seed:', err);
+      });
 
     const unsubStamp = startHubTimestampRepair((err) => {
       console.warn('Hub timestamp repair:', err);
     });
-    return () => unsubStamp();
-  }, []);
+    const unsubHub = startHubPatientSync((err) => {
+      console.warn('Hub patient sync:', err);
+    });
+    return () => {
+      unsubStamp();
+      unsubHub();
+    };
+  }, [consentAccepted]);
 
   const [currentView, setCurrentView] = useState<View>('home');
   const [isLoggedIn, setIsLoggedIn] = useState(() => !!getStoredCaregiverEmail());

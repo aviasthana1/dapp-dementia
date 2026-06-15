@@ -13,6 +13,7 @@ import {
   serverTimestamp,
   writeBatch,
   query,
+  where,
   limit,
   onSnapshot,
   type QueryDocumentSnapshot,
@@ -22,6 +23,8 @@ import {
 import { db } from "./firebase";
 
 const PATIENTS_COLLECTION = "patients";
+const REMINDERS_COLLECTION = "reminders";
+const BATHROOM_ROOM_ID = 1;
 
 export const ROOM_COLLECTION = "rooms";
 export const HUB_CONFIG_COLLECTION = "hubConfig";
@@ -151,6 +154,75 @@ function parseHubActivityDoc(
 }
 
 const HUB_EVENTS_PER_ROOM = 20;
+
+/** Bathroom hub visit → mark matching reminder done for hub patient. */
+let bathroomReconcileInFlight = false;
+
+function isBathroomReminderTitle(title: string): boolean {
+  return title.toLowerCase().includes("bathroom");
+}
+
+async function completeBathroomReminder(patientId: string): Promise<void> {
+  const q = query(
+    collection(db, REMINDERS_COLLECTION),
+    where("patientId", "==", patientId)
+  );
+  const snap = await getDocs(q);
+  const match = snap.docs.find((d) => {
+    const data = d.data();
+    const title = typeof data.title === "string" ? data.title : "";
+    return data.done !== true && isBathroomReminderTitle(title);
+  });
+  if (!match) return;
+  await updateDoc(doc(db, REMINDERS_COLLECTION, match.id), {
+    done: true,
+    completedBy: "hub_bathroom_visit",
+  });
+}
+
+/** Read bathroom events from Firestore and complete reminder when visit is confirmed. */
+export async function reconcileBathroomReminder(patientId: string): Promise<void> {
+  if (bathroomReconcileInFlight) return;
+  bathroomReconcileInFlight = true;
+  try {
+    const eventsRef = collection(db, ROOM_COLLECTION, roomDocId(BATHROOM_ROOM_ID), "events");
+    const snap = await getDocs(eventsRef);
+
+    const events = snap.docs
+      .map((d) => {
+        const data = d.data() as Record<string, unknown>;
+        const timeMs = getHubEventTimeMs(data, d.createTime);
+        return {
+          type: typeof data.type === "string" ? data.type : "",
+          confirmed: isPatientConfirmed(data),
+          timeMs: timeMs > 0 ? timeMs : d.createTime?.toMillis?.() ?? 0,
+        };
+      })
+      .filter((e) => e.confirmed && (e.type === "ENTRY" || e.type === "EXIT"))
+      .sort((a, b) => a.timeMs - b.timeMs);
+
+    if (events.length === 0) return;
+
+    const latest = events[events.length - 1];
+    // Confirmed ENTRY = patient went to bathroom. EXIT = visit finished (also completes).
+    if (latest.type === "ENTRY" || latest.type === "EXIT") {
+      await completeBathroomReminder(patientId);
+      return;
+    }
+
+    // ENTRY then EXIT in history
+    let sawEntry = false;
+    for (const e of events) {
+      if (e.type === "ENTRY") sawEntry = true;
+      if (e.type === "EXIT" && sawEntry) {
+        await completeBathroomReminder(patientId);
+        return;
+      }
+    }
+  } finally {
+    bathroomReconcileInFlight = false;
+  }
+}
 
 /** Collapse duplicate hub writes (same room + type + displayed minute). */
 function hubActivityDedupeKey(e: HubActivity): string {
@@ -384,6 +456,10 @@ function startHubLocationSyncInner(
   const unsubs: Unsubscribe[] = [];
   const seen = new Set<string>();
 
+  void reconcileBathroomReminder(patientId).catch((e) =>
+    onError?.(e instanceof Error ? e : new Error(String(e)))
+  );
+
   for (const seed of SEED_ROOMS) {
     const roomId = seed.roomId;
     const eventsRef = collection(db, ROOM_COLLECTION, roomDocId(roomId), "events");
@@ -393,6 +469,12 @@ function startHubLocationSyncInner(
       onSnapshot(
         q,
         (snap) => {
+          if (roomId === BATHROOM_ROOM_ID) {
+            void reconcileBathroomReminder(patientId).catch((e) =>
+              onError?.(e instanceof Error ? e : new Error(String(e)))
+            );
+          }
+
           for (const change of snap.docChanges()) {
             if (change.type === "removed") continue;
             const dedupeKey = `${roomId}_${change.doc.id}`;
@@ -402,6 +484,16 @@ function startHubLocationSyncInner(
             }
 
             const data = change.doc.data() as Record<string, unknown>;
+            const confirmed = isPatientConfirmed(data);
+            const type = typeof data.type === "string" ? data.type : "?";
+            if (roomId === BATHROOM_ROOM_ID) {
+              console.info(
+                "[HUB]",
+                type,
+                confirmed ? "CONFIRMED" : "unconfirmed (hidden in UI)",
+                data.roomName ?? `room_${roomId}`
+              );
+            }
 
             void mirrorEntryToPatientLocation(
               patientId,
@@ -436,6 +528,24 @@ export function startHubLocationSync(
     .then((hubPatientId) => {
       if (cancelled || hubPatientId !== patientId) return;
       innerUnsub = startHubLocationSyncInner(patientId, onError);
+    })
+    .catch((e) => onError?.(e instanceof Error ? e : new Error(String(e))));
+
+  return () => {
+    cancelled = true;
+    innerUnsub?.();
+  };
+}
+
+/** Hub sync for configured patient — location mirror, timestamps, bathroom reminders. */
+export function startHubPatientSync(onError?: (err: Error) => void): Unsubscribe {
+  let innerUnsub: Unsubscribe | null = null;
+  let cancelled = false;
+
+  void getHubPatientId()
+    .then((hubPatientId) => {
+      if (cancelled || !hubPatientId) return;
+      innerUnsub = startHubLocationSyncInner(hubPatientId, onError);
     })
     .catch((e) => onError?.(e instanceof Error ? e : new Error(String(e))));
 

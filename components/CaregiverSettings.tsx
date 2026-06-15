@@ -74,7 +74,8 @@ export function CaregiverSettings({
       <SectionLabel>BLE hub</SectionLabel>
       <Card className="mb-4">
         <p className="text-sm text-muted mb-3">
-          ESP32 hub ENTRY events are copied into this patient&apos;s location history.
+          ESP32 hub bathroom visits copy into this patient&apos;s location history and mark their
+          bathroom reminder done when the wearable confirms the visit.
         </p>
         {loading ? (
           <p className="text-sm text-muted">Loading…</p>

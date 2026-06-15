@@ -85,9 +85,11 @@ const SEED_REMINDERS: Reminder[] = [
   { id: "r2", patientId: "p1", title: "Drink water", time: "10:00", done: false },
   { id: "r3", patientId: "p1", title: "Lunch", time: "12:30", done: false },
   { id: "r4", patientId: "p1", title: "Afternoon walk", time: "15:00", done: false },
+  { id: "r10", patientId: "p1", title: "Go to the bathroom", time: "09:00", done: false },
   { id: "r5", patientId: "p2", title: "Take morning medication", time: "08:30", done: false },
   { id: "r6", patientId: "p2", title: "Call family", time: "14:00", done: false },
   { id: "r7", patientId: "p3", title: "Take morning medication", time: "09:00", done: false },
+  { id: "r11", patientId: "p3", title: "Go to the bathroom", time: "09:30", done: false },
   { id: "r8", patientId: "p4", title: "Take morning medication", time: "08:00", done: false },
   { id: "r9", patientId: "p4", title: "Rest", time: "13:00", done: false },
 ];
@@ -243,6 +245,15 @@ export async function deleteReminder(reminderId: string): Promise<void> {
 export async function updateReminderDone(reminderId: string): Promise<void> {
   const reminderRef = doc(db, COLLECTIONS.REMINDERS, reminderId);
   await updateDoc(reminderRef, { done: true });
+}
+
+/** Ensure James (or any patient) has a bathroom reminder for hub auto-complete demos. */
+export async function ensureBathroomReminderForPatient(patientId: string): Promise<void> {
+  const reminders = await getRemindersForPatient(patientId);
+  const hasBathroom = reminders.some((r) => r.title.toLowerCase().includes("bathroom"));
+  if (!hasBathroom) {
+    await createReminder(patientId, { title: "Go to the bathroom", time: "09:00" });
+  }
 }
 
 /** Upload a photo for a reminder; returns the public download URL. */
